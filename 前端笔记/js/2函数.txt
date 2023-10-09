@@ -1,0 +1,33 @@
+定义函数
+function 函数名（）{
+	函数体；（代码块）
+}
+
+函数的调用
+直接在script标签里面调用
+函数名（）；直接调用
+在html里面调用<button onlick="函数名（）"></button>
+
+函数的参数
+定义的时候
+function sum（a,b）{
+
+}
+调用的时候sum（10，20）；
+
+带返回值的函数
+function sum（a,b）{
+
+return “Hello”；
+}
+return返还给调用她的部分
+
+局部变量只能在当前函数中使用
+全局变量任何地方都能使用
+var a =10；//a一直是全局变量
+function sum（a,b）{
+var i=10；//局部变量
+x=10；//全局变量
+return “Hello”；
+}
+x在function被调用后会成为全局变量

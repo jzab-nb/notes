@@ -1,0 +1,13 @@
+输出doucument.write("字符串，也可以是标签");
+document.getElementById("这里写id").innerHTML="这里写文字";替换文字内容
+alert（对话框里面的东西）；
+
+<input id="txt" type="text"/>
+<input id="btn" type="button" onclick="demo()" value="按钮"/>
+<script>
+	function demo(){
+		try{
+			var e =document.getElementById("txt").value;
+			if(e==""){throw "请输入"}
+		     }catch(err){alert(err);}
+		          }

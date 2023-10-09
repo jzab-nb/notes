@@ -1,0 +1,21 @@
+transform:2D
+	后面可加的有translate(x,y)以左上角为原点竖直为y轴水平为x轴进行水平位移
+		    rotate()顺时针旋转一定角度单位是deg
+		    scale(x,y)改变元素尺寸无单位默认是倍数
+		    skew(x，y)围绕（自身的）x，y轴旋转
+		    matrix()把所有的合到一起
+	3D
+	后面加rotateX（）；rotateY（）；rotateZ（）；围绕x，y轴旋转z轴伸向屏幕内所以看起来于平面旋转类似
+	
+transform-origin语法
+transform-origin: x-axis y-axis z-axis;具体查看https://www.w3school.com.cn/cssref/pr_transform-origin.asp
+
+transition：想要改变的属性 时间 时间曲线 开始的时间间隔
+属性可以选择多个用，隔开也可以用all
+时间曲线：linear匀速进行
+	 ease慢-快-慢
+	 ease-in慢速开始
+	 ease-out慢速结束
+	 ease-in-out慢速开始结束
+	 cubic-bezier（n，n，n，n）数值为0到1的数越大越慢
+时间和开始前的时间间隔都是以秒为单位

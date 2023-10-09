@@ -1,0 +1,36 @@
+1.元素分类：
+常用的块状元素有：
+
+<div>、<p>、<h1>...<h6>、<ol>、<ul>、<dl>、<table>、<address>、<blockquote> 、<form>
+
+常用的内联元素有：
+
+<a>、<span>、<br>、<i>、<em>、<strong>、<label>、<q>、<var>、<cite>、<code>
+
+常用的内联块状元素有：
+
+<img>、<input>
+2.块级元素：a{diaplay:block;}将内联元素a转换为块级元素，每个块级元素单独一行，高度等都可以设置
+3.内联元素：div{diaplay:inline;}将块级元素设置为内联元素，和其它元素都在一行上，高度等都不可以设置，宽度就是它包含的内容的宽度不可改变
+4.内联块状元素：{display:inline-block}将元素设置成内联块状元素，和其他元素在同一行，可以设置宽和高
+5.隐藏元素：{display:none}给元素隐形
+6.盒子模型：两个盒子的间距margin(纵向重叠，横向不重叠)，边框border，边框和内容的距离padding，内容宽width，内容高height
+7.背景颜色：background-color
+8.盒子边框：border-width边框粗细，border-style边框样式(dashed虚线，dotted点线，solid实线)，border-color边框颜色
+	    可分开也可简写a{border:2px dashed #FFF}
+border可以单独给某个边设置border-bottom
+			       -top
+			       -right
+			       -left
+9圆角边框：border-radius:20px 20px 15px 30px
+		          左上  右上  右下  左下
+也可以分开写：div{
+    border-top-left-radius: 20px;
+   border-top-right-radius: 10px;
+   border-bottom-right-radius: 15px;
+   border-bottom-left-radius: 30px;
+}
+10.填充padding：div{padding:20px 10px 15px 30px}上右下左
+11.外边距margin：与padding相同
+
+			       

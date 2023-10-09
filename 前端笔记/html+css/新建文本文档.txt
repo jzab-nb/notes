@@ -1,0 +1,22 @@
+transition：background-colr 1s 在普通选择器里设置
+background-color处可以替换成别的也可以写成all
+不能改变渐变色
+bg-size设置背景图片（下课查）
+渐变色background-image：liner-gradient（）
+
+动画
+animation:  动画名 1s(时间)
+@keyframes textAppear{
+from{top:20px
+opacity：0（不透明度）
+}
+to{}
+}
+百度搜索css3动画
+
+响应式(适配于不同的屏幕大小)
+@media screen and(max-width: 880px){
+css样式
+}
+
+bootstrap

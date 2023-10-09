@@ -1,0 +1,24 @@
+1。概述：三种布局模型，流动模型Flow，浮动模型Float，层模型Layer
+2.流动模型：网页默认的一般都是流动模型，块状元素自上而下垂直延伸分布。内联元素从左到右水平分布显示。
+3.浮动模型：float：left/right 向左向右浮动
+4.层模型：三种形式（绝对定位position:absolute）（相对定位position:relative）（固定定位position:fixed）
+4.1绝对定位相对于整个网页left向右偏移right向左偏移top向下偏移bottom向上偏移
+4.2相对定位相对于原来的位置，原来的位置仍保留不会被占用，同上
+4.3固定定位相对于窗口，不会随着窗口的移动而移动。
+5.relative与absolute组合使用。
+absolute不仅仅可以相对与网页也可以相对于其他元素但作为参照的元素必须是设置的元素的父元素。
+如：<div class="box1">
+              <div class="box2">
+              </div>
+      </div>
+.box1{
+position:relative ;
+}
+.box2{
+position:absolute ;
+}
+注意：设置元素的父元素必须用relative设置box2的父元素box1必须是relative
+6.弹性盒属性之flex：display:flex给父元素设置，改变子元素的排列方式。默认从左向右排列且和父元素左边没有间隙。
+6.1justify-content属性flex-start左对齐flex-end右对齐center居中space-between两端对齐space-around项目两边距离相等所以距离页边的距离是两个项目间的距离的两倍
+6.2align-items纵轴排列方式，flex-star上对齐，flex-end下对齐，center居中，baseline以文字基线（下线）为对齐线，stretch默认值（占满整个容器）
+6.3flex占比flex：正整数。表示占比多少，设置flex之后原来的宽度会失效

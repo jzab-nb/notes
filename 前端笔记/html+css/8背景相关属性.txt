@@ -1,0 +1,12 @@
+backdround-color
+背景颜色
+bgckground-image
+背景图像
+background-repeat
+repeat默认水平垂直重复
+repeat-x水平重复
+repeat-y垂直重复
+no-repeat不重复
+
+background-attachment
+图像相对于可视区是否固定

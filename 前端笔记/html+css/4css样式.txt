@@ -1,0 +1,31 @@
+一.css字体样式
+1.设置字体种类：font-family:"微软雅黑"或"Microsoft Yahei"
+2.设置字号：font-size:xxpx
+3.设置字体粗细：font-weight:bold;
+4.设置字体样式：font-style:normal 正常
+		          italic     斜体
+		          oblique强制倾斜的字体
+5.设置字体颜色：三种设置方式:英文命名
+                                               rgb(三个0~255的整数或三个百分数)
+		               十六进制#FFFFFF
+6.font样式的简写方法：
+body{
+    font-style:italic;
+    font-weight:bold; 
+    font-size:12px; 
+    line-height:1.5em; 
+    font-family:"宋体",sans-serif;
+}(斜体，加粗，字号，行高，字体)
+简写成
+body{
+    font:italic  bold  12px/1.5em  "宋体",sans-serif;
+}
+二.css文本样式
+1.text-decoration设置文本的线none无线、underline下划线、overline上线、line-through穿过文本的一条线
+2.text-indent:2em;(2em的意思是文字的两倍大小)首行缩进；
+3.line-height行间间距2em(两倍行距)
+4.letter/word-spacing:50px 字符间的距离
+5.text-align 文本对齐方式 center居中 left左 right右
+6.长度值：px像素
+	em父元素的倍数
+	百分比130%元素的百分比

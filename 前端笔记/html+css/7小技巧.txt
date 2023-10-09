@@ -1,0 +1,30 @@
+水平居中1.行内text-align:center;
+             2.定宽块状元素：通过设置左右margin为auto来实现
+             3.已知宽高实现盒子水平垂直居中：利用父元素相对定位子元素绝对定位来实现
+	父元素position:relative子元素position:absolute
+	然后子元素距离父元素的左上各50%
+	在给子元素设置margin:-高度的一半 0 0 -宽度的一半（上右下左）
+             4.宽高不定实现垂直水平居中：利用父元素相对定位子元素绝对定位来实现
+	前两步同上
+	然后利用css的transform:translate(x,y)xy各-50%
+居中问题
+margin：0 auto；(不适用于带有inline的元素如图片)元素居中
+text——align：center文本居中；
+浮动后居中的设置宽度后在居中
+
+清除浮动
+在浮动元素的同级加<div style="clear:both"></div>
+
+鼠标放上变小手：cursor:pointer;
+
+更改链接被点击后的颜色a：visited
+
+li里面套a建议给a加伪类
+
+下拉菜单定位;position:absolute;
+
+科学并排尽量不用浮动用inline-block
+
+&gt；（转义字符）html字符实体谷歌浏览器收藏
+
+两个并排的div对不齐可以设置vertical-align：top来改变

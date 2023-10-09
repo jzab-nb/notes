@@ -1,0 +1,17 @@
+改变输出流
+document.write();
+选择id
+document.getElementById("对应的Id名")；
+选择标签名
+document.getElementsByTagName("p")寻找到第一个p元素
+改变html内容
+.innerHTML= "改变的内容";
+改变标签的属性
+.href=""
+.src=""
+
+句柄
+添加句柄
+.addEventListener("click(这是事件名)",hello(这是函数名));
+移除句柄
+.removeEventListener(括号内容同上)

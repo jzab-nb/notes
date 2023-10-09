@@ -1,0 +1,14 @@
+try{
+发生错误的语句
+}
+catch（err）{
+	alert（err）；
+}
+
+try{
+
+if(){throw "自定义的异常原因"}
+}
+catch（err）{
+	alert（err）；
+}

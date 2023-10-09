@@ -1,0 +1,70 @@
+在html文件中用<script></script>标签书写通常放在head中间
+输出doucument.write("字符串，也可以是标签");
+document.getElementById("这里写id").innerHTML="这里写文字";替换文字内容
+也可以在外部文件中然后用<script src="js文件路径"></script>
+注释
+单行//
+多行/*
+
+
+*/
+变量
+var x =10；
+var y = 10.2;
+var z ="xyu";
+声明变量不用定义类型
+定义数组var arr=[1，2，3，4]；下标从0开始
+var arr =new Array（1，2，3，4）；
+var arr =new Array（）；
+arr[0]=10;
+arr[1]=12;
+
+++i和i++的区别++i先自加后赋值，i++先赋值后自加
+i+=j ；等价于i=i+j-=，/=，*=，%=相同
+
+==和===的区别==只是值相等，===值和变量类型相等
+！=不等于
+三元运算符：（i>1?"i大于10":"i等于10"）;满足条件输出：前面的，不满足条件输出:后面的
+if(条件){
+}
+else{
+}
+可以有多个无限嵌套
+if（）{}
+else if（）{}
+else if（）{}
+else{}
+
+switch (变量名){
+	case 1:
+		break;
+	case 2:
+		break;
+	default:
+		break;
+}
+
+for循环
+for(i=0;i<10;i++){
+
+}
+for(j in i){
+
+}
+
+while循环
+while(i<10) //先判断
+{
+
+i++;
+}
+do	//先执行
+{
+}
+while(){
+
+}
+
+跳转语句
+break，直接跳出循环
+continue，跳出一步循环
