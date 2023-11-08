@@ -1031,7 +1031,9 @@ taskExecutor; // 任务执行者
 
 ## Dubbo
 
-是一款高性能、轻量级的开源javaRPC框架，它提供了三大核心能力：面向接口的远程方法调用，只能容错和负载均衡，以及服务自动注册和发现
+是一款高性能、轻量级的开源javaRPC框架，它提供了三大核心能力：面向接口的远程方法调用，智能容错和负载均衡，以及服务自动注册和发现
+
+底层是Triple协议
 
 <img src="new.4.springBoot.assets/image-20231006203255048.png" alt="image-20231006203255048" style="zoom:50%;" />
 
@@ -1236,6 +1238,11 @@ public class UserServiceImpl implements UserService {
 万变不离其宗，就是为了四个问题
 
 	1. API网关，服务路由
- 	2. Http、RPC框架，异步调用
- 	3. 服务注册与发现，高可用
- 	4. 熔断机制，服务降级
+	2. Http、RPC框架，异步调用
+	3. 服务注册与发现，高可用
+	4. 熔断机制，服务降级
+# SpringSecurity
+
+功能比shiro更加丰富，但上手难度高于shiro。
+
+提供认证和授权。
