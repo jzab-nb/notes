@@ -1246,3 +1246,39 @@ public class UserServiceImpl implements UserService {
 功能比shiro更加丰富，但上手难度高于shiro。
 
 提供认证和授权。
+
+引入: 
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+```
+
+## SpringSecurity的默认流程
+
+它的本质是一个过滤器链，内部包含许多过滤器
+
+![image-20231108143230642](new.4.springBoot.assets/image-20231108143230642.png)
+
+UsernamePasswordAuthenticationFilter: 负责处理用户发送的登录请求
+
+ExceptionTranslationFilter: 负责处理过滤器链中抛出的任何AccessDeniedException和AuthenticationException
+
+FilterSecurityInterceptor: 负责权限校验的处理
+
+## 查看默认的过滤器链
+
+在启动类将run方法的返回值接收(它是一个spring容器)，然后打上断点进行调试
+
+```java
+public static void main(String[] args) {
+    ConfigurableApplicationContext run = SpringApplication.run(SecurityApplication.class, args);
+    System.out.println(111 ); // 这里打断点
+}
+```
+
+在调试界面可以输入java代码片段获取对象
+
+![image-20231108144557230](new.4.springBoot.assets/image-20231108144557230.png)
