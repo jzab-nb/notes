@@ -1282,3 +1282,4 @@ public static void main(String[] args) {
 在调试界面可以输入java代码片段获取对象
 
 ![image-20231108144557230](new.4.springBoot.assets/image-20231108144557230.png)
+
