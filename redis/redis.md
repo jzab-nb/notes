@@ -184,3 +184,4 @@ https://github.com/qishibo/AnotherRedisDesktopManager/
 
 - sinter：求多个集合的交集
 - sdiff：求多个集合的差集，在a中不在b中的
+- sunion: 求多个集合的并集

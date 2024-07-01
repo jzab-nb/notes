@@ -131,3 +131,21 @@ git push origin --delete [名称]
 git branch -dr [remote/branch]
 ```
 
+# 完整流程
+
+```cmd
+# 初始化仓库
+git init
+# 设置远程仓库
+git remote add 仓库名 仓库地址
+# 拉取仓库上的分支
+git pull 仓库名 分支名
+# 本地提交
+git add .
+git commit -m ""
+# 提交到远程仓库
+git push 仓库名 分支名
+```
+
+
+
