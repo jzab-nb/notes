@@ -183,5 +183,47 @@ https://github.com/qishibo/AnotherRedisDesktopManager/
 多个集合间的操作：
 
 - sinter：求多个集合的交集
-- sdiff：求多个集合的差集，在a中不在b中的
+- sdiff：求多个集合的差集，在a中不在b中的 
 - sunion: 求多个集合的并集
+
+#### SortedSet
+
+>help @sorted_set
+>
+>可排序的set集合（根据分值排序），类似TreeSet，底层数据结构为跳表加哈希表，可排序，查询快，不可重复，可以用来实现排行榜
+
+- zadd:添加一个或多个元素到sorted set,如果存在则更新score值
+
+- zrem: 删除指定元素
+
+- zscore: 获取指定元素的分数
+
+- zrank: 获取指定元素的排名
+
+- zcard: 获取元素个数
+
+- zcount: 统计分值在区间范围内的元素个数
+
+- zincrby: 按照指定的步长更新某个元素的分值
+
+- zrange: 返回排名在指定范围内的元素
+
+- zrangebyscore: 返回分数在指定范围内的元素
+
+- zinter：求多个集合的交集
+- zdiff：求多个集合的差集，在a中不在b中的
+- zunion: 求多个集合的并集
+
+涉及排序相关的命令,可以在z后面加rev来进行降序操作
+
+## Redis客户端
+
+### 对比
+
+Jedis: 方法名和redis命令名称相同，学习成本低，但线程不安全
+
+lettuce：基于Nutty，支持响应式和异步编程，支持Redis哨兵、集群、管道
+
+Redisson：基于Redis实现的分布式、可伸缩的Java数据结构集合。包含Map、Queue、Lock、Semaphore、AtomicLong等强大的功能
+
+Spring Data Redis：兼容Jedis和lettuce
