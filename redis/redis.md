@@ -226,4 +226,184 @@ lettuce：基于Nutty，支持响应式和异步编程，支持Redis哨兵、集
 
 Redisson：基于Redis实现的分布式、可伸缩的Java数据结构集合。包含Map、Queue、Lock、Semaphore、AtomicLong等强大的功能
 
-Spring Data Redis：兼容Jedis和lettuce
+Spring Data Redis：集成Jedis和lettuce 
+
+### Jedis
+
+引入依赖
+
+```xml
+<dependency>
+    <groupId>redis.clients</groupId>
+    <artifactId>jedis</artifactId>
+    <version>3.8.0</version>
+</dependency>
+```
+
+基本用法
+
+```java
+// 建立连接
+Jedis jedis = new Jedis("vip.jzab.xyz", 6379);
+// 密码认证
+jedis.auth("102099");
+// 选择数据库
+jedis.select(0);
+// 命令
+Set<String> s = jedis.smembers("lisi");
+// 释放资源
+jedis.close();
+```
+
+ 线程池
+
+```java
+public class JedisFactory {
+    private static final JedisPool jedisPool;
+
+    static{
+        JedisPoolConfig config = new JedisPoolConfig();
+        // 最大连接
+        config.setMaxTotal(8);
+        // 最大空闲连接
+        config.setMaxIdle(8);
+        // 最小空闲连接
+        config.setMinIdle(0);
+        // 最长等待时间
+        config.setMaxWaitMillis(200);
+        jedisPool = new JedisPool(config,"vip.jzab.xyz",6379,1000,"102099");
+    }
+
+    public static Jedis getJedis(){
+        return jedisPool.getResource();
+    }
+}
+```
+
+### SpringDataRedis
+
+https://spring.io/projects/spring-data-redis
+
+- 封装了不同的Redis客户端
+- 提供统一API来操作
+- 支持发布订阅模式
+- 支持哨兵和集群
+- 支持基于Lettuce的响应式编程
+- 支持基于JDK、JSON、字符串、Spring对象的数据序列化和反序列化
+- 支持基于Redis的JDKCollection实现
+
+#### 1.引入依赖
+
+```xml
+<!--        spring data redis-->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
+<!--        连接池-->
+<dependency>
+    <groupId>org.apache.commons</groupId>
+    <artifactId>commons-pool2</artifactId>
+</dependency>
+```
+
+####  2.配置连接
+
+```yaml
+spring:
+  redis:
+    host: vip.jzab.xyz
+    port: 6379
+    password: 102099
+    lettuce: # 默认为lettuce,想使用Jedis需要单独引入
+      pool:
+        max-active: 8 # 最大连接
+        max-idle: 8 # 最大空闲连接
+        min-idle: 0 # 最小空闲连接
+        max-wait: 100 # 连接等待时间
+```
+
+#### 3.注入并使用RedisTemplate
+
+```java
+@Resource
+RedisTemplate<String,String> redisTemplate;
+
+@Test
+void redisTemplateTest(){
+    redisTemplate.opsForValue().set("new:key","李四");
+    redisTemplate.opsForValue( ).get("new:key")
+}
+```
+
+#### 序列化
+
+若要使用json序列化，需要先引入依赖
+
+```xml
+<!--        Jackson依赖-->
+<dependency>
+    <groupId>com.fasterxml.jackson.core</groupId>
+    <artifactId>jackson-databind</artifactId>
+</dependency>
+```
+
+自定义redistemplate的bean，方便使用
+
+```java
+@Configuration
+public class RedisConfiguration {
+    @Bean
+    public RedisTemplate<String,Object> redisTemplate(RedisConnectionFactory connectionFactory){
+        RedisTemplate<String, Object> template = new RedisTemplate<>( );
+        // 设置连接工厂
+        template.setConnectionFactory(connectionFactory);
+        // UTF_8的序列化器常量
+        template.setKeySerializer(RedisSerializer.string());
+        template.setHashKeySerializer(RedisSerializer.string());
+        // json序列化器
+        RedisSerializer<Object> json = RedisSerializer.json( );
+        template.setValueSerializer(json);
+        template.setHashValueSerializer(json);
+        return template;
+    }
+}
+
+```
+
+存储时会带上类信息
+
+```json
+[
+    "java.util.ArrayList",
+    [
+        1,
+        "2",
+        [
+            "[Ljava.lang.String;",
+            [
+                "3"
+            ]
+        ]
+    ]
+]
+```
+
+#### StringRedisTemplate
+
+为了节省内存,key和value都是字符串类型,需要手动处理序列化和反序列化
+
+```java
+@Resource
+StringRedisTemplate stringRedisTemplate;
+
+// json序列化工具
+ObjectMapper mapper = new ObjectMapper( );
+// 手动序列化
+String s = mapper.writeValueAsString(list);
+// 手动反序列化
+list = mapper.readValue(r, ArrayList.class);
+```
+
+### Redis实战
+
