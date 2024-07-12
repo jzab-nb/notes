@@ -385,7 +385,7 @@ public class RedisConfiguration {
                 "3"
             ]
         ]
-    ]
+    ] 
 ]
 ```
 
@@ -405,5 +405,12 @@ String s = mapper.writeValueAsString(list);
 list = mapper.readValue(r, ArrayList.class);
 ```
 
-### Redis实战
+## Redis实战
 
+### Redis实现短信登录
+
+传统的基于session登录的流程
+
+![image-20240708200512675](redis.assets/image-20240708200512675.png)
+
+ 
