@@ -332,7 +332,14 @@ RedisTemplate<String,String> redisTemplate;
 @Test
 void redisTemplateTest(){
     redisTemplate.opsForValue().set("new:key","李四");
-    redisTemplate.opsForValue( ).get("new:key")
+    redisTemplate.opsForValue( ).get("new:key");
+    // 两种带过期时间的设置方式
+    template.opsForValue().set(k,v,Duration.ofMinutes(过期时间-分钟数));
+    template.opsForValue().set("k","v",过期时间-分钟数, TimeUnit.MINUTES);
+    // 哈希类型的设置方式
+    // 哈希类型一次性存入一个map,其中BeanUtil是HUtool包下的
+    template.opsForHash().putAll(key,BeanUtil.beanToMap(bean对象));
+    template.expire(key,过期时间,TimeUnit.SECONDS);
 }
 ```
 
@@ -413,4 +420,34 @@ list = mapper.readValue(r, ArrayList.class);
 
 ![image-20240708200512675](redis.assets/image-20240708200512675.png)
 
- 
+ **session共享问题**: 多台tomcat无法共享session空间
+
+**基于redis登录的思路**:
+
+1. 使用手机号作为key，存储string类型的验证码
+2. 使用随机token作为key，存储用户信息，用户信息的存储可以使用hash结构，也可以使用json格式化的string结构
+3. 登录验证时，手动刷新用户key的过期时间
+
+### redis实现缓存
+
+缓存存储临时数据，读写速度快
+
+![image-20240731205146363](redis.assets/image-20240731205146363.png)
+
+作用：
+
+- 价格低后端负载
+- 提高读写效率，降低响应时间
+
+成本：
+
+- 数据一致性成本
+- 代码维护成本
+- 运维成本（避免雪崩，保证高可用）
+
+#### 实现思路
+
+1. 客户端查询数据
+2. 缓存命中，直接返回，未命中，查询数据库
+3. 数据库命中，刷新到缓存中，数据库未命中，返回404
+
