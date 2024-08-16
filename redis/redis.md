@@ -528,5 +528,5 @@ list = mapper.readValue(r, ArrayList.class);
 
 使用string类型的setnx命令实现互斥锁
 
-setnx: 当key不存在时设置值否则失败
+setnx: 当key不存在时设置值否则失败 
 
