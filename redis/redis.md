@@ -530,3 +530,26 @@ list = mapper.readValue(r, ArrayList.class);
 
 setnx: 当key不存在时设置值否则失败 
 
+```java
+// redis互斥锁简单实现
+public boolean lock(String key){
+    // 设置互斥锁
+    return BooleanUtil.isTrue(
+        template.opsForValue().setIfAbsent(key,"1",10,TimeUnit.SECONDS)
+    );
+}
+
+public void unLock(String key){
+    // 释放锁
+    template.delete(key);
+}
+```
+
+查询未命中时，先获取锁，锁成功了再次判断是否命中，若还是未命中则查询数据库更新缓存
+
+若未获取到锁，则循环等待，直到获取到锁或者名字缓存为止
+
+#### 逻辑过期解决缓存击穿
+
+假设是热点数据的场景：提前将数据放入缓存，不考虑数据未命中的情况，只考虑数据逻辑过期
+
