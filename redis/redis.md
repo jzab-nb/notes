@@ -553,3 +553,9 @@ public void unLock(String key){
 
 假设是热点数据的场景：提前将数据放入缓存，不考虑数据未命中的情况，只考虑数据逻辑过期
 
+使用线程池实现开启新线程调用
+
+```java
+private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+```
+
