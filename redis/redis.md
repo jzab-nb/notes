@@ -559,3 +559,169 @@ public void unLock(String key){
 private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 ```
 
+#### 工具类
+
+redis工具类:
+
+```java
+@Component
+public class RedisUtil {
+    @Resource
+    private StringRedisTemplate template;
+
+    // 设置json对象
+    public void setObject(String key,Object value){
+        template.opsForValue().set(key, JSONUtil.toJsonStr(value));
+    }
+
+    // 获取json对象
+    public <Y> Y getObject(String key,Class<Y> claz){
+        String s = template.opsForValue( ).get(key);
+        if(StringUtils.isBlank(s)) return null;
+        return (Y)JSONUtil.toBean(s,claz);
+    }
+
+    public String getRawValue(String key){
+        return template.opsForValue().get(key);
+    }
+
+    // 添加到排序集合中
+    public void addZset(String key, Object value, double vl){
+        //
+        template.opsForZSet().add(key,JSONUtil.toJsonStr(value),vl);
+    }
+
+    // 获取排序集合
+    public <T> List<T> getZset(String key, Class<T> claz){
+        Long length = template.opsForZSet().zCard(key);
+        Set<String> range = template.opsForZSet( ).range(key, 0, length);
+        List<T> res = new ArrayList<>(  );
+        if(range==null) return res;
+        for (String s : range) {
+            res.add(JSONUtil.toBean(s,claz));
+        }
+        return res;
+    }
+
+    public void expire(String key,long minutes){
+        template.expire(key,minutes, TimeUnit.MINUTES);
+    }
+
+    public void expire(String key,long time,TimeUnit unit){
+        template.expire(key,time, unit);
+    }
+
+
+    public void remove(String key){
+        template.delete(key);
+    }
+
+    public boolean lock(String key){
+        // 设置互斥锁
+        return BooleanUtil.isTrue(
+            template.opsForValue().setIfAbsent(key,"1",10,TimeUnit.SECONDS)
+        );
+    }
+
+    public void unLock(String key){
+        // 释放锁
+        template.delete(key);
+    }
+}
+```
+
+
+
+缓存工具类:
+
+```java
+@Component
+public class CacheUtils {
+    @Resource
+    private RedisUtil redisUtil;
+
+    //1.将任意java对象序列化成json并设置ttl
+    public void saveWithTTL(String key, Object value, Long time, TimeUnit timeUnit){
+        redisUtil.setObject(key,value);
+        redisUtil.expire(key,time,timeUnit);
+    }
+    //2.将任意java对象序列化成json并设置ttl并设置逻辑过期
+    public void saveWithLogic(String key, Object value, Long time,TimeUnit unit){
+        RedisData redisData = new RedisData( );
+        redisData.setData(value);
+        redisData.setExpireTime(LocalDateTime.now().plusSeconds(unit.toSeconds(time)));
+        redisUtil.setObject(key,redisData);
+    }
+    //3.根据key返回并反序列化,利用空值解决缓存穿透
+    public <T,ID> T getWithThrough(
+        String keyPrefix, ID id, Class<T> clazz, Function<ID,T> func,
+        Long time,TimeUnit unit
+    ){
+        String key = keyPrefix+id;
+        // 1.查缓存
+        T object = redisUtil.getObject(key, clazz);
+        // 2.不为空返回
+        if(object!=null) return object;
+        // 3.为空看是null还是空字符串,是空字符串则返回
+        String rawValue = redisUtil.getRawValue(key);
+        boolean a = rawValue !=null;
+        if(a) return null;
+        // 4.是null则更新数据库
+        T result = func.apply(id);
+        if(result==null){
+            this.saveWithTTL(key,"",time,unit);
+        }else{
+            this.saveWithTTL(key,result,time,unit);
+        }
+        return result;
+    }
+
+    private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+
+    //4.根据key返回并反序列化,利用逻辑过期解决缓存击穿
+
+    public <T,ID> T getWithLogicExpire(
+            String keyExpire, ID id, Class<T> clazz, Function<ID,T> func,Long time,TimeUnit unit){
+        String key = keyExpire+id;
+        // 1.查询缓存
+        RedisData object = redisUtil.getObject(key, RedisData.class);
+        // 2.未命中直接返回null
+        if(object==null){
+            return null;
+        }else{
+            // 3.命中后判断逻辑是否过期,逻辑未过期直接返回
+            JSONObject data = (JSONObject)object.getData( );
+            T shop = JSONUtil.toBean(data, clazz);
+            // 4.逻辑过期则获取锁开启新线程同步数据,自己则返回过期数据
+            if(object.getExpireTime().isBefore(LocalDateTime.now())){
+                String lockKey = RedisConstants.LOCK_SHOP_KEY+id;
+                boolean lock = redisUtil.lock(lockKey);
+                // 获取锁成功,则开线程
+                if(lock){
+                    // 二次判断,防止线程安全问题
+                    object = redisUtil.getObject(key, RedisData.class);
+                    // 真的过期了再更新
+                    if(object.getExpireTime().isBefore(LocalDateTime.now())){
+                        // 开启一个线程单独处理
+                        CACHE_REBUILD_EXECUTOR.submit(()->{
+                            try{
+                                T obj = func.apply(id);
+                                if(obj!=null){
+                                    this.saveWithLogic(key,obj,time,unit);
+                                }
+                            }catch (Exception e){
+                                throw new RuntimeException( e );
+                            }finally {
+                                redisUtil.unLock(lockKey);
+                            }
+                        });
+                    }
+                }
+            }
+            // 过期未过期的,都直接返回
+            return shop;
+        }
+    }
+}
+```
+
