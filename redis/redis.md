@@ -725,3 +725,61 @@ public class CacheUtils {
 }
 ```
 
+### Redis秒杀
+
+#### 全局唯一ID
+
+不建议使用数据库自增ID，缺点：
+
+- 规律性过于明显
+- 受单表数据量限制
+
+全局唯一ID要符合：
+
+- 唯一性
+- 高可用
+- 高性能
+- 递增性
+- 安全性
+
+ID组成(类似雪花算法):
+
+- 符号位：1bit，永远为0
+- 时间戳：31bit，秒为单位，可以使用69年
+- 序列号：32bit，秒内计数器，每秒产生2^32个不同的ID
+
+```java
+@Component
+public class RedisIDWorker {
+
+    /*
+    开始时间戳
+     */
+    LocalDateTime startTime = LocalDateTime.of(2024,8,20,0,0);
+    /*
+    序列号占位
+     */
+    int move = 32;
+
+    @Resource
+    StringRedisTemplate stringRedisTemplate;
+
+    public long generate(String keyPrefix){
+        // 获取当前时间
+        LocalDateTime now = LocalDateTime.now( );
+        // 当前时间减去开始时间,得到时间戳
+        long time = now.toEpochSecond(ZoneOffset.UTC)-startTime.toEpochSecond(ZoneOffset.UTC);
+        // 时间左移32位
+        time<<=move;
+        // key的一部分
+        String format = now.format(DateTimeFormatter.ofPattern(":yyyy:MM:dd"));
+        // 拼接key
+        String key = "icr:"+keyPrefix+format;
+        // 获取自增序列号
+        long increment = stringRedisTemplate.opsForValue( ).increment(key);
+        // 拼接两部分
+        return time | increment;
+    }
+}
+```
+
