@@ -806,3 +806,330 @@ public class RedisIDWorker {
 
 #### 一人一单实现
 
+通过加锁实现，synchronize关键字会锁住整个this对象，不建议使用，建议使用用户ID去加锁
+
+在实现扣减库存和增加订单的时候，采用注解事务，但是要想让锁对事务生效，需要获取到spring的代理对象，代码如下
+
+```java
+@Override
+public Result create(Long id) {
+    SeckillVoucher voucher = seckillVoucherService.getById(id);
+    if(voucher==null) return Result.fail("优惠券不存在");
+    // 1.判断时间是否在开始时间和结束时间中
+    if (voucher.getBeginTime().isAfter(LocalDateTime.now())) {
+        return Result.fail("秒杀未开始");
+    }
+
+    if (voucher.getEndTime().isBefore(LocalDateTime.now())) {
+        return Result.fail("秒杀已经结束");
+    }
+    // 2.判断是否有库存
+    if(voucher.getStock()<=0) return Result.fail("库存不足!!");
+
+    Long userId = UserHolder.getUser( ).getId( );
+    // 锁住用户ID,先上锁再开启事务
+    synchronized (userId.toString().intern()){
+        // 获取代理对象
+        IVoucherOrderService service =  (IVoucherOrderService) AopContext.currentProxy();
+        // 用代理对象去调用,否则事务不生效
+        return service.createOrder(id);
+
+    }
+}
+
+@Transactional
+public Result createOrder(Long id){
+    Long userId = UserHolder.getUser( ).getId( );
+    // 额外判断,一人一单
+    Integer count = this.query( )
+        .eq("user_id", userId)
+        .eq("voucher_id", id).count( );
+    if(count>0) return Result.fail("请勿重复购买!!");
+    // 3.扣减库存
+    boolean success = seckillVoucherService.update( )
+        .setSql("stock = stock-1")
+        .eq("voucher_id", id)
+        .gt("stock",0)
+        .notExists("select 1 from tb_voucher_order where voucher_id='"+id+"' and user_id='"+ userId +"'")
+        .update( );
+    if(!success) return Result.fail("库存不足");
+
+    // 4.创建订单
+    VoucherOrder order = new VoucherOrder( );
+    long orderId = idWorker.generate("voucher");
+    order.setId(orderId);
+    order.setVoucherId(id);
+    order.setUserId(userId);
+    this.save(order);
+    return Result.ok(orderId);
+}
+```
+
+同时需要引入aop相关依赖和在启动类上使用注解声明暴露代理对象
+
+```java
+@EnableAspectJAutoProxy(exposeProxy = true)
+```
+
+```xml
+<dependency>
+    <groupId>org.aspectj</groupId>
+    <artifactId>aspectjweaver</artifactId>
+</dependency>
+```
+
+#### 集群环境下的线程安全问题
+
+> 首先创建集群环境，在idea启动配置项中使用Ctrl+D可以快速复制启动配置，然后修改复制出来的配置项
+>
+> 设置jvm参数 -Dserver.port=8082 覆盖端口
+
+> 然后修改ngin配置，实现负载均衡
+
+```conf
+
+worker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/json;
+
+    sendfile        on;
+    
+    keepalive_timeout  65;
+
+    server {
+        listen       8080;
+        server_name  localhost;
+        # 指定前端项目所在的位置
+        location / {
+            root   html/hmdp;
+            index  index.html index.htm;
+        }
+
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   html;
+        }
+
+
+        location /api {  
+            default_type  application/json;
+            #internal;  
+            keepalive_timeout   30s;  
+            keepalive_requests  1000;  
+            #支持keep-alive  
+            proxy_http_version 1.1;  
+            rewrite /api(/.*) $1 break;  
+            proxy_pass_request_headers on;
+            #more_clear_input_headers Accept-Encoding;  
+            proxy_next_upstream error timeout;  
+            #proxy_pass http://127.0.0.1:8081;
+            proxy_pass http://backend;
+        }
+    }
+
+    upstream backend {
+        server 127.0.0.1:8081 max_fails=5 fail_timeout=10s weight=1;
+        server 127.0.0.1:8082 max_fails=5 fail_timeout=10s weight=1;
+    }
+}
+```
+
+发现，在集群模式下，JVM的锁无法生效，因为每个JVM使用的是自己的锁，不同JVM的锁不共享
+
+### 分布式锁
+
+> 分布式锁：满足分布式系统或集群模式下，多线程可见并且互斥的锁
+>
+> 且要做到，高可用，高性能，高安全性
+
+|        | Mysql                     | Redis                       | Zookeeper                        |
+| ------ | ------------------------- | --------------------------- | -------------------------------- |
+| 互斥   | 利用Mysql本身的互斥锁机制 | 使用setnx指令实现互斥       | 利用节点的唯一性和有序性实现互斥 |
+| 高可用 | 好                        | 好                          | 好                               |
+| 高性能 | 一般                      | 好                          | 一般                             |
+| 安全性 | 断开连接，自动释放锁      | 利用key的过期机制，到期释放 | 临时节点，断开连接自动释放       |
+
+#### 基于redis的分布式锁
+
+实现分布式锁首先需要实现两个方法
+
+- 获取锁: 
+  - 二者同时操作保证原子性: set key 值 EX 时间 NX
+  - 非阻塞模式：获取成功返回true，失败返回false
+
+- 释放锁: 
+  - del key
+  - 超时释放
+
+```java
+public class SimpleRedisLock implements ILock{
+    private final StringRedisTemplate template;
+    private final String name;
+    private static final String PRE_FIX="lock:";
+
+    public SimpleRedisLock(StringRedisTemplate template, String name) {
+        this.template = template;
+        this.name = name;
+    }
+
+    @Override
+    public boolean tryLock(long second) {
+        long id = Thread.currentThread( ).getId( );
+
+        Boolean result = template.opsForValue( ).setIfAbsent(PRE_FIX + name, id + "", second, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(result);
+    }
+
+    @Override
+    public void unLock() {
+        template.delete(PRE_FIX+name);
+    }
+}
+```
+
+#### 锁误删除问题1
+
+![image-20240824170049963](redis.assets/image-20240824170049963.png)
+
+线程释放锁时，锁已经自动失效，而导致删除了其他线程创建的锁
+
+解决思路：释放锁之前判断标识是否是自己的
+
+```java
+public class SimpleRedisLock implements ILock{
+    private final StringRedisTemplate template;
+    private final String name;
+    private static final String PRE_FIX="lock:";
+    private static final String ID_PREFIX = UUID.randomUUID( ).toString(true )+"_";
+
+    public SimpleRedisLock(StringRedisTemplate template, String name) {
+        this.template = template;
+        this.name = name;
+    }
+
+    @Override
+    public boolean tryLock(long second) {
+        String id = ID_PREFIX+Thread.currentThread( ).getId( );
+
+        Boolean result = template.opsForValue( ).setIfAbsent(PRE_FIX + name, id, second, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(result);
+    }
+
+    @Override
+    public void unLock() {
+        String id = ID_PREFIX+Thread.currentThread( ).getId( );
+        String val = template.opsForValue( ).get(PRE_FIX + name);
+        if(id.equals(val)){
+            template.delete(PRE_FIX+name);
+        }
+    }
+}
+
+```
+
+
+
+#### 锁误删除问题2
+
+![image-20240824215541749](redis.assets/image-20240824215541749.png)
+
+在判断完成之后准备删除时，线程阻塞了，之后锁自动超时，其他线程创建了自己的锁导致出现问题
+
+解决思路：保证判断和删除操作的原子性，使用Lua脚本保证操作的原子性 
+
+##### LUA脚本
+
+基础语法
+
+```redis
+eval "LUA脚本内容" key参数长度 KEY参数... 其他参数...
+取KEY参数时: KEYS[位置]
+取其他参数时: ARGV[位置]
+例如:
+eval "redis.call('set',KEYS[1],ARGV[1])" 1 test2 vvv
+```
+
+在java中使用lua脚本
+
+```java
+@Resource
+StringRedisTemplate template;
+ 
+// 脚本只需要加载一次
+private static final DefaultRedisScript<Long> sc;
+
+static {
+    sc = new DefaultRedisScript<>(  );
+    // 指定脚本的位置(resources目录下)
+    sc.setLocation(new ClassPathResource("unlock.lua"));
+    // 设置返回值类型
+    sc.setResultType(Long.class);
+}
+
+@Test
+public void luT(){
+    System.out.println(sc.getScriptAsString() );
+    // 设置键
+    ArrayList<String> keys = new ArrayList<>( );
+    keys.add("test");
+    // 调用获取返回结果
+    Object result = template.execute(sc, keys, "2");
+    System.out.println(result );
+}
+```
+
+删除键的脚本内容
+
+```lua
+if (ARGV[1] == redis.call('get',KEYS[1])) then
+    return redis.call('del',KEYS[1])
+end
+return 0
+```
+
+#### 基于Redis的分布式锁问题
+
+之前实现的锁存在一些问题
+
+1. 不可重入，同一个线程无法同时获取同一个锁
+2. 不可重试，获取锁就立即失败，没有重试机制
+3. 超时释放，若业务执行时间过长，会导致锁释放，存在安全隐患
+4. 主从一致性问题，主写从读，若主宕机，从没有同步到数据，会导致锁失效
+
+#### Redisson
+
+基于redis实现的分布式的工具
+
+提供了分布式对象，分布式集合，分布式锁等功能。
+
+> 导入依赖
+
+```xml
+<dependency>
+    <groupId>org.redisson</groupId>
+    <artifactId>redisson</artifactId>
+    <version>3.13.6</version>
+</dependency>
+```
+
+> 配置Redisson客户端
+
+```java
+@Configuration
+public class RedissonConfig {
+    @Bean
+    public RedissonClient redissonClient(){
+        Config config = new Config(  );
+        config.useSingleServer()
+                .setAddress("redis://ip:6379").setPassword("password");
+        return Redisson.create(config);
+    }
+}
+```
+
