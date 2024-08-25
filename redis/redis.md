@@ -1,7 +1,46 @@
 ## 面试题
 
-缓存穿透、雪崩、击穿的原因和应对策略
-Redis 如何保证数据一致性？
+### 缓存穿透，雪崩，击穿的原因和应对策略
+
+1. 缓存穿透
+
+   原因：用户大量访问在缓存和数据库都不存在的key，导致一直向数据库发送请求
+
+   策略：
+
+   - 对不存在的key，在redis中存储空值
+   - 增加key的复杂性，防止恶意猜测，在查询前对key的格式做校验，拦截不符合格式的key
+   - 布隆过滤器，优点：响应速度快，缺点：不是百分之百准确，实现相对复杂
+   - 限制用户的权限，对用户进行限流
+
+2. 缓存雪崩
+
+   原因：大量key同时失效，或者redis直接宕机导致请求直接打到数据库
+
+   策略：
+
+   - 对TTL增加随机值，防止同时过期
+   - redis采用集群模式，增加可用性
+   - 采用多级缓存
+   - 对业务进行降级，限流
+
+3. 缓存击穿
+
+   原因：热点key失效导致大量请求到达数据库，热点key一般是会存在高并发访问，或者重建失效的特点
+
+   策略：
+
+   - 逻辑过期，优点：没有等待时间，缺点：一致性较低，实现困难
+   - 互斥锁，优点：一致性高，实现简单，缺点：需要阻塞等待
+
+### Redis 如何保证数据一致性
+
+共有大约三种方式保证数据一致性
+
+1. 数据变动时，主动更新缓存
+2. 利用TTL过期机制，过期后再刷新
+3. 利用内存淘汰策略
+
 Redis 底层数据结构和 IO 模型
 Redis 为什么快？只是因为在内存中操作吗？
 Redis 的有序集合为什么用跳表？
@@ -1108,7 +1147,7 @@ return 0
 
 提供了分布式对象，分布式集合，分布式锁等功能。
 
-> 导入依赖
+> 1.导入依赖
 
 ```xml
 <dependency>
@@ -1118,7 +1157,7 @@ return 0
 </dependency>
 ```
 
-> 配置Redisson客户端
+> 2.配置Redisson客户端
 
 ```java
 @Configuration
@@ -1133,3 +1172,56 @@ public class RedissonConfig {
 }
 ```
 
+> 3.互斥锁使用
+
+```java
+@Resource
+private RedissonClient redissonClientl;
+
+public void testRedisson() throws InterruptedException {
+    RLock lock = redissonClientl.getLock("key");
+    // 获取锁,超时时间,过期时间,时间单位
+    boolean isLock = lock.tryLock(1,10, TimeUnit.SECONDS);
+    if(isLock){
+        try {
+            System.out.println("执行" );
+        }finally {
+            lock.unlock();
+        }
+    }
+}
+```
+
+#### Redisson可重入锁原理
+
+使用hash结构存储锁，field为线程标识，value为重入次数
+
+获取锁时重入次数+1，重置有效期
+
+删除锁时重入次数-1，次数为0了才删除
+
+获取锁和释放锁都使用lua脚本保证原子性
+
+#### Redisson锁重试原理
+
+获取锁失败后订阅(subscribe)通知
+
+释放锁时发布(publish)通知
+
+#### Redisson看门狗原理
+
+创建锁时先将存有线程id的entry放入一个ConcurrentHashMap中
+
+然后设置定时任务，过了锁过期时间的1/3后，执行续期操作
+
+任务内部递归调用自己
+
+在释放锁时删除entry，取消任务
+
+![image-20240825175621086](redis.assets/image-20240825175621086.png)
+
+#### Redisson解决主从一致性问题
+
+Redisson内部不区分主从，将所有的节点一视同仁，同时存入锁
+
+使用MultiLock实现
