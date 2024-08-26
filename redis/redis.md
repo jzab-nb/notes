@@ -889,7 +889,8 @@ public Result createOrder(Long id){
         .setSql("stock = stock-1")
         .eq("voucher_id", id)
         .gt("stock",0)
-        .notExists("select 1 from tb_voucher_order where voucher_id='"+id+"' and user_id='"+ userId +"'")
+        // 这里是画蛇添足,其实不需要再次判断
+        // .notExists("select 1 from tb_voucher_order where voucher_id='"+id+"' and user_id='"+ userId +"'")
         .update( );
     if(!success) return Result.fail("库存不足");
 
@@ -1225,3 +1226,13 @@ public void testRedisson() throws InterruptedException {
 Redisson内部不区分主从，将所有的节点一视同仁，同时存入锁
 
 使用MultiLock实现
+
+### 秒杀优化
+
+首先把业务分成两部分，分别是秒杀资格的判断，和秒杀订单的生成
+
+秒杀资格的判断在redis中进行,耗时短
+
+秒杀订单的生成在数据库中进行，用独立的线程执行
+
+![image-20240826215058551](redis.assets/image-20240826215058551.png)
