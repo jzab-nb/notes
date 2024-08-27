@@ -1236,3 +1236,199 @@ Redisson内部不区分主从，将所有的节点一视同仁，同时存入锁
 秒杀订单的生成在数据库中进行，用独立的线程执行
 
 ![image-20240826215058551](redis.assets/image-20240826215058551.png)
+
+完整代码:
+
+```java
+@Slf4j
+@Service
+public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
+
+    @Resource
+    ISeckillVoucherService seckillVoucherService;
+
+    @Resource
+    RedisIDWorker idWorker;
+
+    @Resource
+    RedisUtil redisUtil;
+
+    @Resource
+    StringRedisTemplate template;
+
+    @Autowired
+    RedissonClient redissonClient;
+
+    @Autowired
+    RedissonClient redissonClient2;
+
+    // 阻塞队列
+    private BlockingQueue<VoucherOrder> orders = new ArrayBlockingQueue<VoucherOrder>(1024*1024);
+    // 新建单线程线程池
+    private static final ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor();
+    // 异步处理类
+    private IVoucherOrderService proxyService;
+
+    private class OrderHandler implements Runnable{
+        @Override
+        public void run() {
+            while (true){
+                try {
+                    // 取出并创建订单
+                    VoucherOrder order = null;
+                    order = orders.take( );
+                    RLock lock = redissonClient.getLock("order:"+order.getUserId());
+                    boolean isLock = lock.tryLock();
+                    if(!isLock) {
+                        log.error("创建订单失败");
+                    }
+                    try {
+                        // 获取代理对象 用代理对象去调用,否则事务不生效
+                        proxyService.createOrderAsync(order);
+                    }finally {
+                        lock.unlock();
+                    }
+                } catch (InterruptedException e) {
+                    log.error("处理订单异常"+e.getMessage());
+                }
+            }
+        }
+    }
+
+    @PostConstruct
+    private void init(){
+        // 提交任务执行
+        SECKILL_ORDER_EXECUTOR.submit(new OrderHandler());
+    }
+
+
+
+    @Override
+    // 创建订单
+    public Result create(Long id) throws InterruptedException {
+        return createNew(id);
+        //return createOld(id);
+    }
+
+
+    // 用新的方法创建
+    public Result createNew(Long id) throws InterruptedException {
+        SecKillUtils secKillUtils = new SecKillUtils(template);
+        if(secKillUtils.canBuy(id,UserHolder.getUser( ).getId( ))){
+            // 创建订单对象,
+            VoucherOrder voucherOrder = new VoucherOrder( );
+            long orderId = idWorker.generate("voucher");
+            voucherOrder.setId(orderId);
+            voucherOrder.setVoucherId(id);
+            voucherOrder.setUserId(UserHolder.getUser( ).getId( ));
+            // 存入阻塞队列
+            orders.add(voucherOrder);
+
+            // 获取代理对象 用代理对象去调用,否则事务不生效
+            proxyService =  (IVoucherOrderService) AopContext.currentProxy();
+
+            return Result.ok(orderId);
+        }else{
+            return Result.fail("订单创建失败");
+        }
+    }
+
+    public Result createOld(Long id) throws InterruptedException{
+        SeckillVoucher voucher = seckillVoucherService.getById(id);
+        if(voucher==null) return Result.fail("优惠券不存在");
+        // 1.判断时间是否在开始时间和结束时间中
+        if (voucher.getBeginTime().isAfter(LocalDateTime.now())) {
+            return Result.fail("秒杀未开始");
+        }
+
+        if (voucher.getEndTime().isBefore(LocalDateTime.now())) {
+            return Result.fail("秒杀已经结束");
+        }
+        // 2.判断是否有库存
+        if(voucher.getStock()<=0) return Result.fail("库存不足!!");
+
+        Long userId = UserHolder.getUser( ).getId( );
+//        // 锁住用户ID,先上锁再开启事务
+//        synchronized (userId.toString().intern()){
+//            // 获取代理对象
+//            IVoucherOrderService service =  (IVoucherOrderService) AopContext.currentProxy();
+//            // 用代理对象去调用,否则事务不生效
+//            return service.createOrder(id);
+//        }
+
+//        ILock lock = new SimpleRedisLock(template,"order:"+userId);
+//        boolean isLock = lock.tryLock(1200);
+//        if(!isLock) return Result.fail("不允许重复下单,请重试!");
+//        try{
+//            // 获取代理对象
+//            IVoucherOrderService service =  (IVoucherOrderService) AopContext.currentProxy();
+//            // 用代理对象去调用,否则事务不生效
+//            return service.createOrder(id);
+//        }finally {
+//            lock.unLock();
+//        }
+
+        RLock lock = redissonClient.getLock("order:"+userId);
+        boolean isLock = lock.tryLock();
+        if(!isLock) return Result.fail("不允许重复下单,请重试!");
+        try {
+            // 获取代理对象
+            IVoucherOrderService service =  (IVoucherOrderService) AopContext.currentProxy();
+            // 用代理对象去调用,否则事务不生效
+            return service.createOrder(id);
+        }finally {
+            lock.unlock();
+        }
+    }
+
+    @Transactional
+    public Result createOrder(Long id){
+        Long userId = UserHolder.getUser( ).getId( );
+        // 额外判断,一人一单
+        Integer count = this.query( )
+                .eq("user_id", userId)
+                .eq("voucher_id", id).count( );
+        if(count>0) return Result.fail("请勿重复购买!!");
+        // 3.扣减库存
+        boolean success = seckillVoucherService.update( )
+                .setSql("stock = stock-1")
+                .eq("voucher_id", id)
+                .gt("stock",0)
+                //.notExists("select 1 from tb_voucher_order where voucher_id='"+id+"' and user_id='"+ userId +"'")
+                .update( );
+        if(!success) return Result.fail("库存不足");
+
+        // 4.创建订单
+        VoucherOrder order = new VoucherOrder( );
+        long orderId = idWorker.generate("voucher");
+        order.setId(orderId);
+        order.setVoucherId(id);
+        order.setUserId(userId);
+        this.save(order);
+        return Result.ok(orderId);
+    }
+
+    @Transactional
+    @Override
+    public void createOrderAsync(VoucherOrder order){
+        Long userId = order.getUserId();
+        // 额外判断,一人一单
+        Integer count = this.query( )
+                .eq("user_id", userId)
+                .eq("voucher_id", order.getVoucherId()).count( );
+        if(count>0) log.error("请勿重复购买");
+        // 3.扣减库存
+        boolean success = seckillVoucherService.update( )
+                .setSql("stock = stock-1")
+                .eq("voucher_id", order.getVoucherId())
+                .gt("stock",0)
+                //.notExists("select 1 from tb_voucher_order where voucher_id='"+id+"' and user_id='"+ userId +"'")
+                .update( );
+        if(!success) log.error("库存不足");
+
+        // 4.创建订单
+        this.save(order);
+    }
+}
+```
+
