@@ -1512,8 +1512,114 @@ redis5.0新引入的**数据类型**，可以实现功能非常完善的消息�
 
 - 消息有漏读的风险
 
-消费者组：将多个消费者划分到一个组中，监听同一个队列，具备下列特点：
+**消费者组**：将多个消费者划分到一个组中，监听同一个队列，具备下列特点：
 
 1. 消息分流：组内竞争关系，一条消息只会给组内一个消费者消费
 2. 消息标识：维护一个标识，记录最后一个被处理的消息，确保消息被消费
-3. 消息确认，消费者获取消息后，消息处于pending状态，并存入列表，处理完成后需要通过XACK确认消息，标记为已处理，才会从列表中移除
+3. 消息确认，消费者获取消息后，消息处于pending状态，并存入pending-list列表，处理完成后需要通过XACK确认消息，标记为已处理，才会从列表中移除
+
+创建消费者组:
+
+> XGROUP CREATE key groupName ID [MKSTREAM]
+
+- key: 队列名称
+
+- groupName: 消费者组名称
+
+- ID: 从哪条消息开始消费，$代表最后一条，0代表第一条
+
+- MKSTREAM: 消息队列不存在时是否创建
+
+删除消费者组
+
+> XGROUP DESTORY key groupName
+
+给指定的消费者组添加消费者
+
+> XGROUP CREATECONSUMER key groupname consumername
+
+删除消费者组中的消费者
+
+> XGROUP DELCONSUMER key groupname consumername
+
+从消费者组读取消息
+
+> XREADGROUP GROUP group consumer [COUNT count] [BLOCK milliseconds] [NOACK] STREAMS key [key ...] ID [ID ...]
+
+- group: 消费者组名称
+
+- consumer: 消费者名称,组内不存在自动创建
+
+- count: 本次查询的最大数量
+
+- BLOCK milliseconds: 最长等待时间
+
+- NOACK: 无需手动确认，收到消息自动确认
+
+- STREAMS key: 指定队列名称
+
+- ID: 获取消息的起始ID
+
+- ">": 从第一个未消费的消息开始
+
+- 其他: 根据ID从pending-list中读取已经消费但未确认的消息，0是从pending-list中的第一个消息开始
+
+确认消息:
+
+> XACK key group ID [ID ...]
+
+- 传入的ID为redis生产的那个ID
+
+查看未确认的消息
+
+> XPENDING key group [[IDLE min-idle-time] start end count [consumer]]
+
+- min-idle-time: 从获取消息后未被确认的时间
+
+- start: 最小ID 传 - 代表从开头开始
+
+- end: 最大ID 传 + 代表从最后结束
+
+- count: 获取的数量
+
+- 例如: XPENDING test g1 IDLE - + 100
+
+#### java实现消费者伪代码
+
+```java
+while(true){
+    // 从队列中获取消息,阻塞2000ms
+    if(获取为空){
+        // 没消息了,阻塞等待
+        continue;
+    }
+    try{
+        // 处理消息
+    }catch(){
+        while(true){
+            // 从pending-list获取消息
+            if(获取为空){
+                // 未处理的处理完了,跳出循环
+                break;
+            }
+            try{
+                // 处理消息
+            }catch(){
+                // 再次出现异常,记录日志,继续循环
+                continue;
+            }
+        }
+    }
+}
+```
+
+#### 三种方式对比
+
+|              | List                                   | PubSsub          | Stream                                |
+| ------------ | -------------------------------------- | ---------------- | ------------------------------------- |
+| 消息持久化   | 支持                                   | 不支持           | 支持                                  |
+| 阻塞读取     | 支持                                   | 支持             | 支持                                  |
+| 消息堆积处理 | 受内存空间限制，可以用多消费者加快处理 | 受限于消息缓冲区 | 受限于队列长度,可以用消费者组减少堆积 |
+| 消息确认机制 | 不支持                                 | 不支持           | 支持                                  |
+| 消息回溯     | 不支持                                 | 不支持           | 支持                                  |
+
