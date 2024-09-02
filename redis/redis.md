@@ -1623,4 +1623,99 @@ while(true){
 | 消息确认机制 | 不支持                                 | 不支持           | 支持                                  |
 | 消息回溯     | 不支持                                 | 不支持           | 支持                                  |
 
+#### 代码实现
+
+> 处理队列内容
+
+```java
+while(true){
+    try {
+        // 从队列中读取
+        List<MapRecord<String, Object, Object>> result = template.opsForStream( ).read(
+            Consumer.from("g1", "c1"),
+            StreamReadOptions.empty( )
+            .count(1)
+            .block(Duration.ofSeconds(2)),
+            StreamOffset.create("stream.orders", ReadOffset.lastConsumed( ))
+        );
+        if(result==null || result.isEmpty()) continue;
+        // 读取消息并转换成订单对象
+        MapRecord<String, Object, Object> record = result.get(0);
+        Map<Object, Object> value = record.getValue( );
+        VoucherOrder voucherOrder = BeanUtil.toBean(value, VoucherOrder.class);
+        // 订单信息写入数据库
+        proxyService.createOrderAsync(voucherOrder);
+        template.opsForStream().acknowledge("stream.orders","g1", record.getId());
+    }catch (Exception e){
+        log.error("创建订单时发生错误"+e.getMessage());
+        e.printStackTrace();
+        processPendingList();
+    }
+}
+```
+
+> 发生异常时的处理逻辑
+
+```java
+while(true){
+    try{
+        // 取出未确认的
+        List<MapRecord<String, Object, Object>> result = template.opsForStream( ).read(
+            Consumer.from("g1", "c1"),
+            StreamReadOptions.empty( )
+            .count(1)
+            .block(Duration.ofSeconds(2)),
+            StreamOffset.create("stream.orders", ReadOffset.from("0"))
+        );
+        // 取不到了直接返回
+        if(result==null || result.isEmpty()) return;
+        // 读取消息并转换成订单对象
+        MapRecord<String, Object, Object> record = result.get(0);
+        Map<Object, Object> value = record.getValue( );
+        VoucherOrder voucherOrder = BeanUtil.toBean(value, VoucherOrder.class);
+        // 订单信息写入数据库
+        createOrderAsync(voucherOrder);
+        // 成功了要确认
+        template.opsForStream().acknowledge("stream.orders","g1", record.getId());
+    }catch (Exception e){
+        log.error("创建订单时发生错误"+e.getMessage());
+        // 出异常先休眠
+        try {
+            Thread.sleep(20);
+        } catch (InterruptedException interruptedException) {
+            interruptedException.printStackTrace( );
+        }
+    }
+}
+```
+
+> 判断秒杀资格和写入队列的脚本
+
+```lua
+local USER_ID = ARGV[1];
+local VOUCHER_ID = ARGV[2];
+local STOCK_KEY = 'seckill:stock:'..VOUCHER_ID;
+local BUY_KEY = 'seckill:buy:'..VOUCHER_ID;
+local ORDER_ID = ARGV[3];
+
+-- 1.查看库存是否超卖
+if (tonumber(redis.call('get',STOCK_KEY))<=0) then
+    -- 没有库存返回1
+    return 1
+end
+-- 2.查看是否已经购买
+if (tonumber(redis.call('sIsMember',BUY_KEY,USER_ID)) == 1) then
+    return 2
+end
+-- 有资格,扣库存并下单
+redis.call('incrby',STOCK_KEY,-1)
+redis.call('sadd',BUY_KEY,USER_ID)
+-- 向队列中添加消息
+redis.call('xadd','stream.orders','*',
+    'voucherId',VOUCHER_ID,
+    'userId',USER_ID,
+    'id',ORDER_ID)
+-- 返回0
+return 0
+```
 
