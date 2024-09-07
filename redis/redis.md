@@ -1777,3 +1777,22 @@ ZRevRangeByScore key 最大值 最小值 [WITHSCORES] [LIMIT 偏移量 数据个
 偏移量处: 第一次是0 ,后面为上一次查出数据的最小值在集合中的个数
 
 数据个数; 固定每页大小 
+
+### 附近商户
+
+#### GEO数据结构
+
+> GEOADD key 经度 纬度 值 :添加经纬度坐标
+>
+> GEODIST key 值1 值2: 计算两个点之间的距离
+>
+> GEOHASH key 值: 将指定点的坐标转换为hash字符串并返回
+>
+> GEOPOS key 值: 返回指定点的坐标
+>
+> GEORADIUS: 给出圆心，半径，计算在这个距离内的点并按距离排序 6.2之后舍弃
+>
+> GEOSEARCH：范围内搜索，可以是圆形或者矩形 6.2新功能
+>
+> GEOSEARCHSTORE： 搜索并存储到指定的key 6.2新功能
+
