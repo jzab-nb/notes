@@ -1,5 +1,13 @@
 ## 面试题
 
+### 数据类型
+
+- string：bitMap
+- hash
+- set
+- sortedSet：geo
+- stream
+
 ### 缓存穿透，雪崩，击穿的原因和应对策略
 
 1. 缓存穿透
@@ -1796,3 +1804,84 @@ ZRevRangeByScore key 最大值 最小值 [WITHSCORES] [LIMIT 偏移量 数据个
 >
 > GEOSEARCHSTORE： 搜索并存储到指定的key 6.2新功能
 
+#### 分页实现
+
+```java
+// 计算分页的起始记录数和结束记录数
+int start=(current-1)*SystemConstants.DEFAULT_PAGE_SIZE;
+int end=current*SystemConstants.DEFAULT_PAGE_SIZE;
+
+// 按照geo距离查询分页好的数据
+GeoResults<RedisGeoCommands.GeoLocation<String>> radius = template.opsForGeo( ).radius(
+    // key
+    RedisConstants.SHOP_GEO_KEY + typeId,
+    // 定位圆心和距离
+    new Circle(new Point(x, y), new Distance(2.6, Metrics.KILOMETERS)),
+    // 包含距离,限制返回结果数
+    RedisGeoCommands.GeoRadiusCommandArgs.newGeoRadiusArgs().includeDistance().limit(end)
+);
+if(radius==null) return new Page<>(  );
+// 跳过前面的结果,达成分页的效果
+List<GeoResult<RedisGeoCommands.GeoLocation<String>>> list = radius.getContent( ).stream( ).skip(start).collect(Collectors.toList( ));
+// 记录id和对应的距离
+List<String> ids = new ArrayList<>(  );
+HashMap<String,Distance> distanceHashMap = new HashMap<>(  );
+for (GeoResult<RedisGeoCommands.GeoLocation<String>> geoLocationGeoResult : list) {
+    String id = geoLocationGeoResult.getContent( ).getName( );
+    ids.add(id);
+    distanceHashMap.put(id,geoLocationGeoResult.getDistance());
+}
+if(ids.isEmpty()) return new Page<>(  );
+// 根据id顺序查询商铺
+List<Shop> record = this.query( )
+    .in("id", ids)
+    .last("ORDER BY FIELD(id,"+StrUtil.join(",",ids)+")").list();
+// 商铺设置距离
+record.forEach(shop->{
+    shop.setDistance(distanceHashMap.get(shop.getId().toString()).getValue());
+});
+Page<Shop> page = new Page<>( );
+page.setRecords(record);
+return page;
+```
+
+### 用户签到
+
+签到数据用数据库行储存过于耗费空间，可以用二进制比特位01来表示是否签到，这种思路就是位图，bitMap
+
+redis用String数据类型实现bitMap
+
+#### bitMap指令
+
+- SETBIT：指定某个二进制位的值
+
+- GETBIT：获取某个二进制位的值
+
+- BITCOUNT：统计值为1的bit位的数量
+
+- BITFIELD：操作（查询，修改，自增）bitMap中bit数据中的指定位置的值
+
+  - ```java
+    bitFIELD testBit GET u3 0
+    ```
+
+- BITFIELD_RO：获取BitMap中bit数组，只读
+
+- BITOP：将多个BitMap的结果进行位运算
+
+- BITPOS：查找bit数组中指定范围内第一个0或者1出现的位置
+
+### UV统计
+
+概念:
+
+- UV: 全称Unique Vistor，独立访客量，一个用户多次访问一天只记录一次
+- PV: 全称PageView，也叫页面访问量，用户每次访问都记录，记录总流量
+
+HyperLogLog：一种概率算法，用于确定非常大的集合的基数，不需要存储所有值
+
+基于string类型实现，单个内存小于16kb，测量结果有小于0.81%的误差。
+
+- PFADD：添加元素
+- PFCOUNT：统计结果
+- PFMERGE：两个集合合并
