@@ -1892,7 +1892,7 @@ HyperLogLog：一种概率算法，用于确定非常大的集合的基数，不
 - PFCOUNT：统计结果
 - PFMERGE：两个集合合并
 
-## Redis高级
+## Redis高级-分布式缓存
 
 单节点redis存在的问题:
 
@@ -2049,9 +2049,96 @@ offset：偏移量,代表同步了多少数据
 
 ### 哨兵(Sentinel)
 
+#### 哨兵原理
+
 哨兵的作用:
 
 - 监控: 实事检查主从节点是否正常工作
 
 - 故障恢复: 主节点宕机之后选举出新的从节点来当主节点,故障节点恢复后,夜以新的主节点为主
 - 通知: 哨兵充当客户端的服务发现来源,当集群发生故障转移时,哨兵会通知客户端
+
+下线判断:
+
+​	哨兵基于心跳机制检测服务的状态，每隔1s向集群所有节点发送PING命令
+
+- 主观下线: 哨兵节点发现实例未在规定时间内响应,则认为主观下线
+- 客观下线: 超过指定数量(quorum)的哨兵都认为一个实例主管下线,则这个实例客观下线,这个值最好超过实例数量的一半
+
+选举:
+
+​	一旦发现主节点下线,哨兵要从从节点里面选择一个座位新的主节点
+
+- 首先判断从节点和哨兵断开的时间长度,超过(down-afer-milliseconds*10)则会排除该节点
+- 判断从节点的slaver-priority值,越小的优先级越高,为0则不参与选举
+- 如果slave-prority一样,则判断从节点的offset值,越大则数据越新,优先级越高
+- 判断从节点的运行ID大小(随机值),越小优先级越高
+
+故障转移: 当选择了新的主节点之后:
+
+- 给新的主节点发送slaveof no one 命令 该节点变为master
+- 哨兵给其他从节点发送 slaveof 新的主节点 的命令,让其他从节点从新的主节点同步数据
+- 哨兵将故障节点标记成slave,并且强制修改配置文件,恢复后自动成为新的主节点的从节点
+
+![image-20240911230929602](redis.assets/image-20240911230929602.png)
+
+#### 哨兵搭建
+
+哨兵需要单独下载,单独配置
+
+```java
+# 端口
+port 27001
+# 哨兵绑定的地址
+sentinel announce-ip 绑定地址
+# 主节点的名称地址和端口,以及超过几个哨兵主观下线了,则客观下线
+sentinel monitor mymaster 主节点地址 6379 2
+# 主从断开超时时间
+sentinel down-after-milliseconds mymaster 5000
+# 从节点故障恢复超时时间
+sentinel failover-timeout mymaster 60000
+dir "/root/redis-work/sentinel/s1"
+# 配置主节点的认证
+sentinel auth-pass mymaster 主节点密码
+```
+
+踩坑: 当从节点需要认证时,需要在主节点加上masterauth配置,否则主节点故障恢复后,会无法连接上从节点
+
+```java
+masterauth 密码
+```
+
+#### SpringBoot整合哨兵模式
+
+```
+redis:
+  # 配置哨兵
+  sentinel:
+  	# 配置节点
+    nodes:
+      - IP:27001
+      - IP:27002
+      - IP:27003
+    # 指定主节点名称
+    master: mymaster
+  # 配置密码(连接各个节点机器而不是哨兵的密码)
+  password: 密码
+```
+
+读写分离配置
+
+```java
+@Bean
+public LettuceClientConfigurationBuilderCustomizer clientConfigurationBuilderCustomizer(){
+    // 读写分离配置
+    return clientConfigurationBuilder -> clientConfigurationBuilder
+        // 优先从从节点读取,若从节点不可用,则使用主节点读取
+        .readFrom(ReadFrom.REPLICA_PREFERRED);
+}
+```
+
+###  分片集群
+
+该模式下存在多个主节点，每个主节点保存不同的数据，每个主节点都可以有多个从节点
+
+主节点直接互相监测，取代哨兵机制
