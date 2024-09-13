@@ -2141,4 +2141,59 @@ public LettuceClientConfigurationBuilderCustomizer clientConfigurationBuilderCus
 
 该模式下存在多个主节点，每个主节点保存不同的数据，每个主节点都可以有多个从节点
 
-主节点直接互相监测，取代哨兵机制
+主节点之间互相监测，取代哨兵机制
+
+#### 配置
+
+先书写六份配置文件
+
+```conf
+port 7001
+# 开启集群
+cluster-enabled yes
+# 集群配置文件,自动生成
+cluster-config-file /root/redis-work/clust1-7001/nodes.conf
+# 节点心跳失败时间
+cluster-node-timeout 5000
+# 持久化文件存放目录
+dir /root/redis-work/clust1-7001/
+# 绑定地址
+bind 0.0.0.0
+# 让redis后台运行
+daemonize yes
+# 注册的实际IP
+replica-announce-ip 39.106.58.236
+# 关闭密码
+protected-mode no
+# 数据库数量
+databases 1
+# 日志文件地址
+logfile /root/redis-work/clust1-7001/redis.log
+```
+
+然后将redis服务全部启动
+
+```shell
+// 一键启动快捷指令
+printf '%s\n' clust1-7001 clust2-7002 clust3-7003 cs1-8001 cs2-8002 cs3-8003 | xargs -I{} -t redis-server {}/redis.conf
+// 查看redis进程
+ps -ef | grep redis
+// 杀死redis进程
+printf '%s\n' 7001 7002 7003 8001 8002 8003 | xargs -I{} -t redis-cli -p {} shutdown
+```
+
+创建集群
+
+```shell
+redis-cli --cluster create --cluster-replicas 1 39.106.58.236:7001 39.106.58.236:7002 39.106.58.236:7003 39.106.58.236:8001 39.106.58.236:8002 39.106.58.236:8003
+
+// 数字1代表每个主节点有几个从节点 ,然后按照先主后从的方式,把所有节点列出来
+// 回车后会询问是否确认 输入yes确认
+```
+
+踩坑: 需要同时开发主节点端口和主节点+10000端口 如 7001 和 17001 否则会导致创建集群时一直等待
+
+#### 插槽(slot)
+
+redis会把每一个主节点映射到0-16383共16384个插槽上
+
