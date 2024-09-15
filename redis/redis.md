@@ -2161,7 +2161,7 @@ dir /root/redis-work/clust1-7001/
 bind 0.0.0.0
 # 让redis后台运行
 daemonize yes
-# 注册的实际IP
+# 集群内部通信的IP
 replica-announce-ip 39.106.58.236
 # 关闭密码
 protected-mode no
@@ -2193,7 +2193,7 @@ redis-cli --cluster create --cluster-replicas 1 39.106.58.236:7001 39.106.58.236
 redis-cli -p 8003 cluster nodes
 ```
 
-踩坑: 需要同时开发主节点端口和主节点+10000端口 如 7001 和 17001 否则会导致创建集群时一直等待
+踩坑: 需要同时开放主从节点端口和主从节点+10000端口(总线端口) 如 7001 和 17001 否则会导致创建集群时一直等待
 
 #### 插槽(slot)
 
@@ -2207,3 +2207,51 @@ redis会根据key的有效部分计算放入哪个插槽
 计算时采用CRC16算法得到hash值再对16384取余，得到插槽值
 
 控制一类数据放在同一个实例上时，使用{}指定共同的有效部分即可
+
+#### 集群伸缩
+
+动态扩容
+
+```shell
+redis-cli --cluster add-node 新节点IP:端口 旧节点IP:端口 [--cluster-slave] [--cluster-master-id <arg>]
+```
+
+通过指定旧的节点IP将新节点加入到集群中,
+
+分配插槽
+
+```shell
+redis-cli --cluster reshard 任意节点IP:端口
+根据提示依次输入 要移动的插槽数 目标节点 源头节点
+```
+
+删除节点
+
+```shell
+// 需要先将要删除的节点的所有插槽分配走,再删除
+redis-cli --cluster del-node 节点IP:端口 节点ID
+```
+
+#### 故障转移
+
+当master节点宕机时，集群会自动将它的slave切换为master
+
+**手动数据迁移**
+
+可以通过执行cluster failover命令可以手动让集群中的主节点宕机，数据切换到执行这个指令的从节点上,实现无感知的数据迁移
+
+![image-20240915165628379](redis.assets/image-20240915165628379.png)
+
+手动实现数据迁移有三种模式:
+
+- 参数缺省: 执行全流程
+- force: 省略了对offset一致性的校验
+- takeover: 直接执行5,忽略一致性和其他节点意见
+
+## Redis高级-多级缓存
+
+传统缓存: 请求先到达tomcat，tomcat性能存在评价，redis缓存会过期，给数据库造成压力
+
+多级缓存: 充分利用请求处理的每个环节，分别添加缓存，减轻tomcat的压力，提升性能
+
+![image-20240915180922014](redis.assets/image-20240915180922014.png)
