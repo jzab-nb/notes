@@ -2255,3 +2255,287 @@ redis-cli --cluster del-node 节点IP:端口 节点ID
 多级缓存: 充分利用请求处理的每个环节，分别添加缓存，减轻tomcat的压力，提升性能
 
 ![image-20240915180922014](redis.assets/image-20240915180922014.png)
+
+### JVM进程缓存
+
+分布式缓存和进程缓存的对比：
+
+分布式缓存：
+
+- 优点：容量大、可靠性好，可以集群共享
+- 缺点：访问时存在网络开销
+- 场景：缓存数据量大、可靠性要求高、需要集群共享
+
+进程本地缓存，例如HashMap，GuavaCache：
+
+- 优点：读取本地内存，无网络开销，速度快
+- 缺点：容量有限，可靠性低，无法共享
+- 场景：性能要求高，缓存数据量小
+
+Caffeine: 一个基于java8开发的，高性能高命中率的本地缓存库
+
+```xml
+<dependency>
+    <groupId>com.github.ben-manes.caffeine</groupId>
+    <artifactId>caffeine</artifactId>
+</dependency>
+```
+
+基础用法
+
+```java
+// 创建缓存对象
+Cache<String, String> cache = Caffeine.newBuilder().build();
+// 存数据
+cache.put("gf", "迪丽热巴");
+
+// 取数据，不存在则返回null
+String gf = cache.getIfPresent("gf");
+System.out.println("gf = " + gf);
+
+// 取数据，不存在则去数据库查询
+String defaultGF = cache.get("defaultGF", key -> {
+    // 这里可以去数据库根据 key查询value
+    return "柳岩";
+});
+System.out.println("defaultGF = " + defaultGF);
+```
+
+设置驱逐策略
+
+```java
+Caffeine.newBuilder()
+                .maximumSize(1) // 设置缓存大小上限
+                .expireAfterWrite(Duration.ofSeconds(1)) // 设置缓存有效期为 10 秒
+                .build();
+```
+
+### LUA
+
+下载并解压安装同时建立链接
+
+```shell
+curl -R -O https://www.lua.org/ftp/lua-5.4.7.tar.gz
+tar -zxvf lua-5.4.7.tar.gz
+make all test
+ln ./lua-5.4.7/src/lua /bin/lua
+```
+
+LUA数据类型
+
+![image-20240921092242510](redis.assets/image-20240921092242510.png)
+
+可以用type函数来判断变量的类型，下面是变量的定义和table的用法
+
+```lua
+-- 定义key为下标的table
+local a = {1,2,3,'4'}
+-- 定义key为字段名的table
+local b = {name="java",age=13}
+-- 通过下标索引取值,索引从1开始
+print(a[1])
+-- 通过字段名取值两种方式
+print(b["name"])
+print(b.name)
+```
+
+字符串使用..进行拼接
+
+```lua
+local c = 'Hello'..'World'
+```
+
+table的循环遍历，pairs用于所有的table，ipairs只适用于以下标为索引的table
+
+```lua
+for k,v in pairs(b) do
+    print('BBB:',k,v)
+end
+
+for k,v in ipairs(a) do
+    print('AAA:',k,v)
+end
+```
+
+函数的定义和使用
+
+```lua
+function 函数名(参数列表)
+	函数体
+    return 返回值
+end
+
+printArr({1,2,3})
+```
+
+分支结构，逻辑运算符号为 and，or，not
+
+```lua
+if(条件1) then
+    分支1
+elseif(条件2) then
+    分支2
+else
+    分支3
+end
+```
+
+### OpenResty
+
+基于nginx的高性能web平台，方便搭建支持高并发和高扩展性的web应用、web服务、网关等
+
+https://openresty.org/cn/
+
+[docker版本安装](https://blog.csdn.net/m0_46606920/article/details/142036208)
+
+```yml
+# 版本信息
+version: "3.8"
+
+# 所有的容器
+services:
+  mysql:
+    image: mysql:5.7.25
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: 123
+    volumes:
+      - "./mysql/conf:/etc/mysql/conf.d"
+      - "./mysql/data:/var/lib/mysql"
+    networks:
+      - jzab
+  openresty:
+    image: openresty/openresty
+    container_name: openresty
+    ports:
+      - "80:80"
+    volumes:
+      - "./openresty/conf:/user/local/openresty/nginx/conf/"
+      - "./openresty/conf.d:/etc/nginx/conf.d/"
+      - "./openresty/html:/usr/local/openresty/nginx/html/"
+      - "./openresty/logs:/usr/local/openresty/nginx/logs/"
+      - "./openresty/lua:/usr/local/openresty/nginx/lua/"
+    depends_on:
+      - mysql
+    networks:
+      - jzab
+# 声明网络的标识和名称
+networks:
+  jzab:
+    name: jzab
+```
+
+#### 快速入门
+
+首先在nginx的配置中导入lua文件和配置接口代理
+
+```conf
+http{
+    # 导入lua和c文件
+    lua_package_path "/usr/local/openresty/lualib/?.lua;;";
+    lua_package_cpath "/usr/local/openresty/lualib/?.so;;";
+}
+server{
+    # 拦截地址
+    location /api/item {
+        # 设置返回值类型
+        default_type application/json;
+        # 将请求交给lua脚本处理
+        content_by_lua_file lua/item.lua;
+    }
+}
+```
+
+在lua文件中写业务逻辑
+
+ngx.say就是返回json数据
+
+```lua
+ngx.say('{"name":1}')
+```
+
+#### 接收请求参数
+
+location后面跟 ~ 代表正则匹配
+
+![image-20240921165159975](redis.assets/image-20240921165159975.png)
+
+#### 发送请求
+
+请求不包含ip和端口，会被转发到nginx内部，需要在nginx配置反向代理
+示例:
+
+```lua
+local resp = ngx.location.capture("/path",{
+	method=ngx.HTTP_GET, -- 请求方式
+    args = {a=1,b=2}, -- get请求的时候传参
+    body = "c=3&d=4" -- post请求传参
+})
+
+resp.status -- 响应状态码
+resp.header -- 响应头
+resp.body -- 响应体
+```
+
+首先书写工具类 common.lua
+
+```java
+-- 封装请求函数
+local function read_http(path,params)
+    local resp = ngx.location.capture(path,{
+        method = ngx.HTTP_GET,
+        args = params
+    })
+    if not resp then
+        -- 没拿到响应,返回错误信息
+        ngx.log(ngx.ERR,"未找到地址:",path,"参数:",args)
+        ngx.exit(404)
+    end
+    return resp.body
+end
+-- 将方法导出
+local _M = {
+    read_http = read_http
+}
+
+return _M
+```
+
+然后将它也引入到openresty中,放入lualib目录
+
+在item.lua中进行调用
+
+```lua
+-- 导入要使用的模块
+local common = require('common')
+local cjson = require('cjson')
+-- 将函数取出
+local read_http = common.read_http
+-- 获取请求的id
+local id = ngx.var[1]
+-- 调用工具类,发送请求
+local itemJson = read_http("/item/"..id,nil)
+local stockJson = read_http("/item/stock/"..id,nil)
+-- 解析json
+local item = cjson.decode(itemJson)
+local stock = cjson.decode(stockJson)
+-- 添加库存
+item.stock = stock.stock
+item.sold = stock.sold
+-- 返回结果
+ngx.say(cjson.encode(item))
+```
+
+最后配置对应接口的转发
+
+```conf
+location ^~ /item {
+	proxy_pass http://items:8081/api/item;
+}
+```
+
+#### 负载均衡
+
