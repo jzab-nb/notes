@@ -2539,3 +2539,77 @@ location ^~ /item {
 
 #### 负载均衡
 
+```conf
+# 负载均衡配置集群
+upstream items{
+    # 根据url去做哈希
+    hash $request_uri;
+    # 转发到两台docker容器
+    server item1:8081;
+    server item2:8081;
+}
+# 转发到集群
+proxy_pass http://items/api/item;
+```
+
+### Redis缓存预热
+
+冷启动: 服务刚启动时无缓存，所有信息第一次查询时添加缓存，可能给数据库带来大的压力
+
+缓存预热：统计热点数据提前放入缓存中
+
+```java
+@Component
+public class RedisHandler implements InitializingBean {
+    @Resource
+    StringRedisTemplate template;
+
+    @Resource
+    ItemService service;
+
+    @Resource
+    ItemStockService stockService;
+
+    private static final ObjectMapper mapper = new ObjectMapper();
+
+    @Override
+    // Bean初始化之后执行
+    public void afterPropertiesSet() throws Exception {
+        String ITEM_PREFIX = "item:";
+        String STOCK_PREFIX = "stock:";
+        // 刷新缓存
+        for (Item item : service.list( )) {
+            String s = mapper.writeValueAsString(item);
+            template.opsForValue().set(ITEM_PREFIX+item.getId(),s);
+        }
+
+        for (ItemStock itemStock : stockService.list( )) {
+            String s = mapper.writeValueAsString(itemStock);
+            template.opsForValue().set(STOCK_PREFIX+itemStock.getId(),s);
+        }
+
+    }
+}
+
+```
+
+### OpenResty操作Redis
+
+```lua
+-- 引入redis依赖
+local redis = require("resty.redis")
+-- 初始化redis对象
+local red = redis:new()
+-- 设置超时时间
+red:set_timeouts(1000,1000,1000)
+
+-- 封装关闭redis连接的函数,实际是放入连接池
+local function close_redis(red)
+    local pool_max_idle_time = 10000 -- 连接空闲时间,单位是毫秒
+    local pool_size = 100 -- 连接池大小
+    local ok,err = red:set_keepalive(pool_max_idle_time,pool_size)
+    if not ok then
+        ngx.log(ngx.ERR,"放入redis连接池失败: ",err)
+    end
+```
+
