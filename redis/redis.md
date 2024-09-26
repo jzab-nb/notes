@@ -2611,5 +2611,275 @@ local function close_redis(red)
     if not ok then
         ngx.log(ngx.ERR,"放入redis连接池失败: ",err)
     end
+    
+-- 查询redis的方法
+local function read_redis(ip, port, key)
+    local ok,err = red:connect(ip,port)
+    if not ok then
+        ngx.log(ngx.ERR,"连接redis失败:",err)
+        return nil
+    end
+
+    local resp, err = red:get(key)
+    if not resp then
+        ngx.log(ngx.ERR,"查询redis失败:",err,",key=",key)
+    end
+
+    if resp==ngx.null then
+        resp = nil
+        ngx.log(ngx.ERR,"查询redis数据为空, key=",key)
+    end
+    close_redis(red)
+    return resp
+end
+-- 先查询redis,在查询tomcat 
+local function read_data(key,path,params)
+    -- 先查询redis
+    local resp =  read_redis('39.106.58.236','6379',key)
+    if not resp then
+        resp = read_http(path,params)
+    end
+    return resp
+end
 ```
+
+### nginx本地缓存
+
+OpenResty提供了shard dict的功能，可以在nginx的多个woreker进程之间共享数据，实现缓存功能。
+
+```conf
+# http模块下配置 共享字典,本地缓存 大小150m
+lua_shared_dict item_cache 150m;
+```
+
+lua里面操作本地缓存
+
+```lua
+-- 获取本地缓存对象
+local item_cache = ngx.shared.item_cache
+-- 存储,键值对和过期时间,单位为秒,0为永不过期
+item_cache:set('key','value',1000)
+-- 读取
+item_cache:get('key')
+```
+
+业务中使用
+
+```lua
+local function read_data(key,path,params,expire)
+    -- 先查询本地
+    local resp = item_cache:get(key)
+    if not resp then
+        -- 本地缓存没有再查询redis
+        ngx.log(ngx.ERR,"本地缓存查询失败,开始查询redis",key)
+        resp =  read_redis('39.106.58.236','6379',key)
+    end
+
+    if not resp then
+        ngx.log(ngx.ERR,"redis缓存查询失败,开始查询tomcat",key)
+        resp = read_http(path,params)
+    end
+
+    -- 设置本地缓存并设置有效期
+    item_cache:set(key,resp,expire)
+
+    return resp
+end
+```
+
+### 缓存同步
+
+- 设置有效期：给缓存设置有效期，到期后自动删除，再次查询时更新。
+  - 优点：简单
+  - 缺点：时效性差，缓存过期之前可能不一致
+  - 场景：更新频率低，时效性要求低的业务
+- 同步双写：修改数据库时，直接修改缓存
+  - 优点：一致性强，时效性强
+  - 缺点：代码耦合，编码难度高
+  - 场景：对一致性和时效性要求高的数据
+- 异步通知：修改数据库时发送事件通知，相关服务监听到通知后修改缓存数据
+  - 优点：低耦合，可以同时通知多个缓存服务
+  - 缺点：时效性一般，可能存在短期不一致
+  - 场景：时效性要求一般，有多个服务需要同步
+
+![image-20240925201249242](redis.assets/image-20240925201249242.png)
+
+canal监听Mysql的binlog，不会影响原有代码结构
+
+具体安装教程看安装Canal文件
+
+java依赖安装
+
+```xml
+<dependency>
+    <groupId>top.javatool</groupId>
+    <artifactId>canal-spring-boot-starter</artifactId>
+    <version>1.2.1-RELEASE</version>
+</dependency>
+```
+
+配置canal的地址
+
+```yml
+canal:
+  destination: heima # 实例名称
+  server: 39.106.58.236:11111
+```
+
+配置实体类
+
+```java
+@Id // Spring包下的ID注解,标识主键
+private Long id;//商品id
+@Column(name="name") // 列名不一致时标识列名
+private String name;//商品名称
+@TableField(exist = false) 
+@Transient // 字段不存在时使用Spring包下的Transient标识
+private Integer stock;
+```
+
+配置监听类
+
+```java
+@Component
+@CanalTable("tb_item")
+public class ItemHandler implements EntryHandler<Item> {
+    @Resource
+    RedisHandler handler;
+
+    @Resource
+    Cache<Serializable,Item> cache;
+
+    @Override
+    public void insert(Item item) {
+        // 插入
+        cache.put(item.getId(),item);
+        handler.saveItem(item);
+    }
+
+    @Override
+    public void update(Item before, Item after) {
+        // 更新
+        cache.put(after.getId(),after);
+        handler.saveItem(after);
+    }
+
+    @Override
+    public void delete(Item item) {
+        // 删除
+        cache.invalidate(item.getId());
+        handler.deleteItem(item);
+    }
+}
+```
+
+![image-20240925211509977](redis.assets/image-20240925211509977.png)
+
+## Redis高级-最佳实践
+
+### key设计
+
+- 遵循基本格式 [业务名称]:[数据名称]:[id]
+  - 例如 login:user:10
+  - 优点：可读性强，避免重复，方便管理
+- 长度不超过44字节
+  - 底层编码使用string类型，小于44字节时使用embstr这一连续内存空间的结构，大于44字节使用raw结构，空间不连续
+  - redis4.0之前限制是39个字节
+  - object encoding key 可以查看一个key对应的val的编码
+- 不包含特殊字符
+
+### BigKey问题
+
+多大算作bigkey：
+
+- 本身过大：stirng类型超过5M
+- 成员过多：集合类型成员超过1w个
+- 成员过大：hash类型只有1000个成员但总大小超过100M  
+
+推荐：
+
+- 单key小于10kb
+- 集合类型少于1000个成员
+
+```memory usage key``` 可以用于判断key占用空间大小
+
+容易出现的问题:
+
+- 网络阻塞：对bigkey进行读取时，会很容易占满代换，导致redis和物理机变慢
+- 数据倾斜：因为数据按照插槽分配，bigkey所在的节点资源占用会比其他节点高，无法达到资源均衡
+- Redis阻塞：元素较多的hash，list，zset等类型进行运算时耗时，主线程阻塞
+- CPU压力：bigkey的序列化和反序列化占用cpu较多，影响redis和其他应用
+
+发现bigkey：
+
+- redis-cli --bigkeys指令查询，可以得到统计信息和每个类型最大的key
+- scan指令扫描所有的key进行分析
+  - scan 游标  MATCH 通配符 COUNT 一次返回的数量，返回值就是本次扫描到的key和下一次扫描的起始的游标
+
+- 第三方工具如：Redis-Rdb-Tools，分析rdb文件
+- 网络监控：自定义工具监控进入的网络数据（阿里云服务有提供好的工具）
+
+bigkey删除：
+
+- 3.0及之前，集合类型先遍历（HScan等）删除元素，再删除大key
+- 4.0之后：unlink指令，异步删除
+
+### 恰当的数据类型
+
+案例1，存放User对象：
+
+1. JSON字段：优点：实现简单，缺点：数据耦合，不够灵活
+2. 字段打散：优点：访问灵活，缺点：占用总空间大，无法统一控制
+3. hash结构：优点：底层使用ziplist，空间占用小，可以灵活访问，缺点：代码复杂
+
+案例2，hash类型内有100万个id自增的field
+
+1. entry超过500时会使用哈希表结构而不是ziplist
+2. 可以通过hash-max-ziplist-entries来配置entry上限,但是会导致BigKey问题
+3. 拆分: id/100 为key,id%100为field，这样100个元素为一个hash
+
+### 批处理
+
+一次命令的响应时间为往返网络的延时+命令的处理时间
+
+N条命令依次执行时，会产生过多的网络传输耗时
+
+mset和hmset等操作天然支持批量插入数据，但一次不宜设置过多，因为会导致网络阻塞
+
+但内置的指令不够灵活
+
+使用**pipelined**可以批量执行各种操作
+
+m操作是原子性的，pipelined不是原子性的
+
+### 集群下的批处理
+
+m操作和pipeline等操作要求所有的key在同一个插槽上
+
+jedis没有集成集群下的M操作 ，需要手动处理
+
+SpringDataRedis集成了集群下的M操作，采用的是并行slot方式
+
+![image-20240926211714197](redis.assets/image-20240926211714197.png)
+
+### 持久化配置
+
+1. 用于缓存的Redis不开启持久化，分布式锁和库存等功能的节点，开启持久化
+
+2. 建议关闭RDB持久化，开启AOF持久化
+
+3. 利用脚本定期在slave做RDB
+
+4. 设置合理的重写阈值，避免频繁的重写
+
+5. 设置no-appendfsync-on-rewrite=yes，禁止在rewrite期间进行aof，避免AOF引起的阻塞
+
+   ![image-20240926213333997](redis.assets/image-20240926213333997.png)
+
+部署建议：
+
+1. Redis物理机留足内存，应对fork和rewrite
+2. 单个实例内存上限不要太大，可以加快fork速度，减少主从同步、数据迁移的压力
+3. 不要和CPU密集型的应用一起部署（如ES）
+4. 不要和高硬盘负载的应用一起部署。如：数据库，消息队列
 
