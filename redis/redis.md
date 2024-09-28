@@ -2993,13 +2993,232 @@ cluster-require-full-coverage yes
 
 ## Redis原理篇-数据结构
 
-### 动态字符串SDS
+### SDS-动态字符串
 
 c语言的字符串:
 
 - 获取长度需要运算
 - 二进制不安全(无法存储'\0')
 - 不可修改
+
+```c
+struct __attribute__ ((__packed__)) sdshdr8 {
+    uint8_t len; /* 不包含结束符号的长度 */
+    uint8_t alloc; /* 申请的总字节的数,不包含结束标识 */
+    unsigned char flags; /* 不同的SDS头类型,控制SDS的头大小 */
+    char buf[]; // 字符数组,存储数据
+};
+
+
+// flags的值对应 下面五种类型 
+#define SDS_TYPE_5  0
+#define SDS_TYPE_8  1
+#define SDS_TYPE_16 2
+#define SDS_TYPE_32 3
+#define SDS_TYPE_64 4
+```
+
+扩容规则：
+
+- 如果新字符串小于1M，则新空间为扩展后字符串长度的两倍+1
+- 如果新字符串大于1M，则新空间为扩展后字符串的长度+1M+1。称为内存预分配
+
+优点:
+
+- 获取长度为O1
+- 支出动态扩容
+- 减少内存分配次数
+- 二进制安全(可以存特殊字符\0)
+
+### IntSet
+
+是Redis中Set集合的一种实现方式，基于数组封装，具备长度可变，有序等特征。
+
+```c
+typedef struct intset {
+    uint32_t encoding; // 编码方式,支持 16,32,64三种
+    uint32_t length;   // 元素个数
+    int8_t contents[]; // 内容,保存实际数据
+} intset;
+
+#define INTSET_ENC_INT16 (sizeof(int16_t)) // 2字节 类似short
+#define INTSET_ENC_INT32 (sizeof(int32_t)) // 4字节 类似int
+#define INTSET_ENC_INT64 (sizeof(int64_t)) // 8字节 类似long
+```
+
+**IntSet中的元素默认升序排列**
+
+寻址: 地址 = 起始地址+(元素大小*角标)
+
+**IntSet动态升级**
+
+新添加的元素长度超过了原来的范围，会自动升级编码方式到合适的大小
+
+1. 升级编码到新的大小，按照新的编码方式及元素个数，获得新的大小并扩容
+2. 将元素倒序拷贝到新的的位置（防止元素重叠）
+3. 将新加的元素放入数组末尾
+4. 修改结构体的encoding字段和length
+
+```c
+/* 插入新元素 */
+intset *intsetAdd(intset *is, int64_t value, uint8_t *success) {
+    // 获取新元素的编码
+    uint8_t valenc = _intsetValueEncoding(value);
+    // 获取要插入的位置
+    uint32_t pos;
+    // 成功标志
+    if (success) *success = 1;
+
+    /* 如果新的编码大于旧的编码 */
+    if (valenc > intrev32ifbe(is->encoding)) {
+        /* 升级并添加元素 */
+        return intsetUpgradeAndAdd(is,value);
+    } else {
+        /* 查找是否有重复的 */
+        if (intsetSearch(is,value,&pos)) {
+            // 如果重复插入失败
+            if (success) *success = 0;
+            return is;
+        }
+        // 元素扩容
+        is = intsetResize(is,intrev32ifbe(is->length)+1);
+        // 移动旧元素,给新元素腾出位置
+        if (pos < intrev32ifbe(is->length)) intsetMoveTail(is,pos,pos+1);
+    }
+    // 插入新元素
+    _intsetSet(is,pos,value);
+    // 长度+1
+    is->length = intrev32ifbe(intrev32ifbe(is->length)+1);
+    return is;
+}
+
+/* 查找要插入的位置 */
+static uint8_t intsetSearch(intset *is, int64_t value, uint32_t *pos) {
+    int min = 0, max = intrev32ifbe(is->length)-1, mid = -1;
+    int64_t cur = -1;
+
+    /* The value can never be found when the set is empty */
+    // 旧的长度是0,直接返回
+    if (intrev32ifbe(is->length) == 0) {
+        if (pos) *pos = 0;
+        return 0;
+    } else {
+        /* Check for the case where we know we cannot find the value,
+         * but do know the insert position. */
+        // 旧的元素比最大的大或者比最小的小,则直接放入最大或者最小的位置
+        if (value > _intsetGet(is,max)) {
+            if (pos) *pos = intrev32ifbe(is->length);
+            return 0;
+        } else if (value < _intsetGet(is,0)) {
+            if (pos) *pos = 0;
+            return 0;
+        }
+    }
+    // 二分查找要插入的位置
+    while(max >= min) {
+        // 最大最小值相加/2
+        mid = ((unsigned int)min + (unsigned int)max) >> 1;
+        // 获取中间值
+        cur = _intsetGet(is,mid);
+        if (value > cur) {
+            min = mid+1;
+        } else if (value < cur) {
+            max = mid-1;
+        } else {
+            break;
+        }
+    }
+    // 查找结束,如果重复返回1
+    // 否则返回0,并把可以插入的下标带出来
+    if (value == cur) {
+        if (pos) *pos = mid;
+        return 1;
+    } else {
+        if (pos) *pos = min;
+        return 0;
+    }
+}
+
+
+/* 动态升级 */
+static intset *intsetUpgradeAndAdd(intset *is, int64_t value) {
+    // 当前编码
+    uint8_t curenc = intrev32ifbe(is->encoding);
+    // 新编码
+    uint8_t newenc = _intsetValueEncoding(value);
+    // 旧的长度
+    int length = intrev32ifbe(is->length);
+    // 判断是放在前面还是后面,小于0放在前面
+    int prepend = value < 0 ? 1 : 0;
+
+    /* 更改编码 */
+    is->encoding = intrev32ifbe(newenc);
+    // 重新修改数组大小
+    is = intsetResize(is,intrev32ifbe(is->length)+1);
+
+    /* 倒序遍历移动元素到新位置(prepend为1则移动到下标+1位置) */
+    while(length--)
+        _intsetSet(is,length+prepend,_intsetGetEncoded(is,length,curenc));
+
+    /* Set the value at the beginning or the end. */
+    // 插入新元素
+    if (prepend)
+        _intsetSet(is,0,value);
+    else
+        _intsetSet(is,intrev32ifbe(is->length),value);
+    // 更新长度
+    is->length = intrev32ifbe(intrev32ifbe(is->length)+1);
+    return is;
+}
+```
+
+### Dict-字典
+
+用于实现Redis的键值映射，由三部分组成：
+
+- 哈希表 DictHashtable
+
+  ```c
+  typedef struct dictht {
+      // 键值对的数组
+      dictEntry **table;
+      // 哈希表的大小
+      unsigned long size;
+      // 哈希表大小的掩码 永远等于大小-1
+      unsigned long sizemask;
+      // 元素数量,可能比哈希表大小大
+      unsigned long used;
+  } dictht;
+  ```
+
+  大小永远为2的N次方
+
+  掩码永远为2的N次方减一，一个哈希值和掩码做与运算就等于求余数的结果，结果就是要存储的索引
+
+  新元素采用头插法
+
+- 哈希节点 DictEntry
+
+  ```c
+  // 键值对
+  typedef struct dictEntry {
+      // 键可以是任何类型
+      void *key;
+      // 值可以是下面几个类型中的一种
+      union {
+          void *val;
+          uint64_t u64;
+          int64_t s64;
+          double d;
+      } v;
+      // 指向链表上的下一个键值对
+      struct dictEntry *next;
+  } dictEntry;
+  ```
+
+- 字典 Dict
+
+
 
 ## Redis原理篇-网络模型
 
