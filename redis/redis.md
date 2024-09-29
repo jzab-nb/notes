@@ -3218,7 +3218,54 @@ static intset *intsetUpgradeAndAdd(intset *is, int64_t value) {
 
 - 字典 Dict
 
+  ```c
+  typedef struct dict {
+      // 哈希函数类型
+      dictType *type;
+      // 私有数据,特殊哈希函数使用
+      void *privdata;
+      // 哈希表
+      dictht ht[2];
+      // 重新索引进度,-1代表未开始
+      long rehashidx; 
+      // 重新索引是否暂停 大于0暂停
+      int16_t pauserehash; 
+  } dict;
+  ```
 
+#### Dict扩缩容
+
+为了防止哈希冲突导致的链表过长，每次插入新元素时会检查负载因子（used/size）的大小，满足以下条件时会进行哈希扩容
+
+- 如果大于等于1并且没有后台进程在执行
+- 如果大于等于5
+
+```c
+static int _dictExpandIfNeeded(dict *d)
+{
+    /* 如果正在执行扩容,则返回 */
+    if (dictIsRehashing(d)) return DICT_OK;
+
+    /* 如果哈希表是空的,则进行初始化容量,默认是4 */
+    if (d->ht[0].size == 0) return dictExpand(d, DICT_HT_INITIAL_SIZE);
+
+    if (
+        d->ht[0].used >= d->ht[0].size && // 负载因子大于等于1了
+        (dict_can_resize || d->ht[0].used/d->ht[0].size > dict_force_resize_ratio) &&
+        // 并且可以重新分配 或者 负载因子大于5了
+        dictTypeExpandAllowed(d)
+    )
+    {
+        // 扩容大小为大于等于used+1的第一个2的n次方
+        return dictExpand(d, d->ht[0].used + 1);
+    }
+    return DICT_OK;
+}
+```
+
+删除元素后会检查是否需要收缩
+
+![image-20240929174523351](redis.assets/image-20240929174523351.png)
 
 ## Redis原理篇-网络模型
 
