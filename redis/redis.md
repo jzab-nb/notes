@@ -3267,6 +3267,95 @@ static int _dictExpandIfNeeded(dict *d)
 
 ![image-20240929174523351](redis.assets/image-20240929174523351.png)
 
+动态扩缩容
+
+```c
+int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
+{
+    if (malloc_failed) *malloc_failed = 0;
+
+    /* 正在重新哈希或者used已经大于size了,重新调整容量失败 */
+    if (dictIsRehashing(d) || d->ht[0].used > size)
+        return DICT_ERR;
+
+    dictht n; /* 新哈希表 */
+    // 获取size的下一个2的N次方
+    unsigned long realsize = _dictNextPower(size);
+
+    /* 内存溢出,报错 */
+    if (realsize < size || realsize * sizeof(dictEntry*) < realsize)
+        return DICT_ERR;
+
+    /* 新旧一致,报错 */
+    if (realsize == d->ht[0].size) return DICT_ERR;
+
+    /* 设置新哈希表的size */
+    n.size = realsize;
+    n.sizemask = realsize-1;
+    if (malloc_failed) {
+        n.table = ztrycalloc(realsize*sizeof(dictEntry*));
+        *malloc_failed = n.table == NULL;
+        if (*malloc_failed)
+            return DICT_ERR;
+    } else
+        // 分配内存空间
+        n.table = zcalloc(realsize*sizeof(dictEntry*));
+    n.used = 0;
+
+    /* 是初始化的则直接复制 */
+    if (d->ht[0].table == NULL) {
+        d->ht[0] = n;
+        return DICT_OK;
+    }
+
+    /* 是扩容或者收缩,复制给ht[1]并开始rehash */
+    d->ht[1] = n;
+    d->rehashidx = 0;
+    return DICT_OK;
+}
+```
+
+#### rehash
+
+扩缩容后，size和sizemask改变，必须将旧的哈希表内的key重新计算，移动到新的哈希表内
+
+为了防止rehash耗时太久导致主线程阻塞，redis采用渐进式rehash，每次增删改查时都会rehash一次
+
+1. 计算新的哈希表的realsize
+
+   - 如果扩容 realsize = 第一个大于 ht[0].used+1 的2的N次方
+   - 如果缩容 realsize = 第一个大于 ht[0].used 的2的N次方
+
+2. 安装新size申请空间,赋值给ht[1]
+
+3. 设置rehashidx=0，开始rehash
+
+4. 每次增删改查时将ht[0].table[rehashidx]位置的元素都rehash到新哈希表上，rehashidx自增，直到都处理完。
+
+   注意：在rehash时，新增操作永远到ht[1]，查询修改删除两边都走
+
+5. 将dict[1]赋值给dict[0]，dict[1] 置为空，原dict[0]内存释放
+
+### ZipList
+
+ZipList是一种特殊的双端链表，由一系列特殊编码的连续内存块组成。可以在任意一端进行压入/弹出操作，且时间复杂度为O(1)
+
+![img](redis.assets/HY%7BDXB83W%602X4N_%7DYOO$GZN.png)
+
+Entry不使用指针而是使用下面的结构
+
+![image-20241001101426527](redis.assets/image-20241001101426527.png)
+
+- 注意：ZipList中所有存储长度的数值都使用小端字节序（0x1234存储成0x3412）
+
+Encoding部分编码分为字符串和整数两种
+
+- 字符串：encoding以00，01，10开头
+
+  ![image-20241001102556404](redis.assets/image-20241001102556404.png)
+
+- 整数：encoding以11开头
+
 ## Redis原理篇-网络模型
 
 ## Redis原理篇-通信协议
