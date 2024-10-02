@@ -3356,7 +3356,337 @@ Encoding部分编码分为字符串和整数两种
 
 - 整数：encoding以11开头
 
+  ![image-20241001220235843](redis.assets/image-20241001220235843.png)
+
+节点个数不能过多
+
+#### ZipList的连锁更新问题
+
+N个连续的长度为250-253字节的entry，第一个entry长度变为超过253时，后续的节点都要跟着变化。
+
+这种特殊情况下产生连续多次空间扩展的操作称之为连锁更新。新增和删除都有可能导致连锁更新。
+
+注意：该问题因为发生概率小，目前仍未解决
+
+### QuickList
+
+ 为了防止ZipList占用太多的连续内存而导致效率低下，需要限制ZipList的长度和Entry的大小
+
+为了存储大量的数据，可以使用多个分散的ZipList来存储。
+
+Redis3.2引入的QuickList，她是一个双端链表，将多个ZipList联系起来
+
+Redis中有配置，list-max-ziplist-size，可以限制ZipList的大小
+
+- 值为正数时，限制的是Entry的个数
+- 值为负数时，限制的是最大内存大小
+  - -1：4kb
+  - -2：8kb
+  - -3：16kb
+  - -4：32kb
+  - -5：64kb
+
+默认值是-2
+
+QuickList可以对节点的ZipList进行压缩，通过list-compress-depth来控制
+
+- 0：不压缩
+- n\>=1: 左右两边n个节点不压缩,中间的压缩
+
+```c
+typedef struct quicklist {
+    // 头尾指针
+    quicklistNode *head;
+    quicklistNode *tail;
+    // 所有ZipList的Entry数量之和
+    unsigned long count;        
+    // ZipList的数量
+    unsigned long len;         
+    // ZipList的Entry上限
+    int fill : QL_FILL_BITS;              
+    // 不压缩的节点数量
+    unsigned int compress : QL_COMP_BITS; 
+    // 内存重新分配时的书签数量及数组,一般用不到
+    unsigned int bookmark_count: QL_BM_BITS;
+    quicklistBookmark bookmarks[];
+} quicklist;
+
+typedef struct quicklistNode {
+    // 前指针和后指针
+    struct quicklistNode *prev;
+    struct quicklistNode *next;
+    // ZipList的指针
+    unsigned char *zl;
+    // ZipList的字节数
+    unsigned int sz;            
+    // ZipList的Entry数
+    unsigned int count : 16;     
+    // 编码方式 1,ZipList 2,lzf压缩模式
+    unsigned int encoding : 2;   /* RAW==1 or LZF==2 */
+    // 容器类型(预留字段) 1,其他 2,ZipList
+    unsigned int container : 2;  
+    // 是否被解压缩
+    unsigned int recompress : 1; 
+    // 废弃字段
+    unsigned int attempted_compress : 1; 
+    unsigned int extra : 10; 
+} quicklistNode;
+```
+
+### SkipList(跳表)
+
+本质还是链表，但和传统链表有差异，效率和红黑树类似：
+
+- 元素升序排列
+- 节点可能包含多个指针（最大支持32层），指针跨度不同
+
+![image-20241001224536940](redis.assets/image-20241001224536940.png)
+
+```c
+typedef struct zskiplistNode {
+    // 节点存储的值
+    sds ele;
+    // 节点分数,排序查找使用
+    double score;
+    // 前一个节点的指针
+    struct zskiplistNode *backward;
+    // 多级索引数组
+    struct zskiplistLevel {
+        // 下一个节 点的指针
+        struct zskiplistNode *forward;
+        // 索引跨度
+        unsigned long span;
+    } level[];
+} zskiplistNode;
+
+typedef struct zskiplist {
+    // 头尾指针
+    struct zskiplistNode *header, *tail;
+    // 节点数量
+    unsigned long length;
+    // 最大索引层级,默认1
+    int level;
+} zskiplist;
+```
+
+### RedisObject
+
+Redis中任意类型的键值数据都会被封装成RedisObject，也叫做Redis对象
+
+```c
+/*-- 高层数据类型 --*/
+#define OBJ_STRING 0    /* String object. */
+#define OBJ_LIST 1      /* List object. */
+#define OBJ_SET 2       /* Set object. */
+#define OBJ_ZSET 3      /* Sorted set object. */
+#define OBJ_HASH 4      /* Hash object. */
+/*-- 底层编码实现 --*/
+#define OBJ_ENCODING_RAW 0     /* raw编码的SDS */
+#define OBJ_ENCODING_INT 1     /* long类型的字符串 */
+#define OBJ_ENCODING_HT 2      /* dict字典 */
+#define OBJ_ENCODING_ZIPMAP 3  /* 已经废弃 */
+#define OBJ_ENCODING_LINKEDLIST 4 /* 双端链表(已经废弃) */
+#define OBJ_ENCODING_ZIPLIST 5 /* 压缩列表 */
+#define OBJ_ENCODING_INTSET 6  /* 整数集合 */
+#define OBJ_ENCODING_SKIPLIST 7  /* 跳表 */
+#define OBJ_ENCODING_EMBSTR 8  /* ems编码的SDS */
+#define OBJ_ENCODING_QUICKLIST 9 /* 快速列表 */
+#define OBJ_ENCODING_STREAM 10 /* Stream流 */
+/*-- Redis对象 --*/
+typedef struct redisObject {
+    // 数据类型
+    unsigned type:4;
+    // 底层编码
+    unsigned encoding:4;
+    // 记录最近一次被访问时间,占24比特位
+    unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
+                            * LFU data (least significant 8 bits frequency
+                            * and most significant 16 bits access time). */
+    // 引用计数器,计时器为0则可以被垃圾回收
+    int refcount;
+    // 指向实际数据
+    void *ptr;
+} robj;
+```
+
+数据类型和底层编码的对应
+
+![image-20241001230614765](redis.assets/image-20241001230614765.png)
+
+可以通过object encoding key来查看一个key的底层编码
+
+### 五大基本类型-字符串
+
+String类型
+
+- 基本编码方式为RAW，基于简单动态字符串SDS，存储上限为512mb
+- SDS长度小于44字节（这时元信息和内容加起来恰好为64字节,方便Redsi分配）时，使用EMBSTR编码，此时对象头和SDS存放在连续的内存空间上
+- 如果存储的字符串是整数值，并且大小在LONG_MAX以内，采用INT编码，直接将数据保存在RedisObject的ptr位置（刚好8字节），不需要SDS
+
+### 五大基本类型-List
+
+Redis的List结构类似一个双端链表，可以从首尾操作元素
+
+- 3.2版本之前使用ZipList和LinkedList，元素个数小于512个且元素大小小于64字节时使用ZipList，超过则采用LinkedList
+- 3.2版本之后统一使用QuickList
+
+```c
+void pushGenericCommand(client *c, int where, int xx) {
+    int j;
+    // 遍历元素
+    for (j = 2; j < c->argc; j++) {
+        // 元素是否超过上限
+        if (sdslen(c->argv[j]->ptr) > LIST_MAX_ITEM_SIZE) {
+            addReplyError(c, "Element too large");
+            return;
+        }
+    }
+    // 找到key对应的List
+    robj *lobj = lookupKeyWrite(c->db, c->argv[1]);
+    // 类型是否正确
+    if (checkType(c,lobj,OBJ_LIST)) return;
+    // 检查是否为空
+    if (!lobj) {
+        if (xx) {
+            addReply(c, shared.czero);
+            return;
+        }
+        // 为空则创建新的QuickList
+        lobj = createQuicklistObject();
+        // 限制zipList的大小等配置
+        quicklistSetOptions(lobj->ptr, server.list_max_ziplist_size,
+                            server.list_compress_depth);
+        dbAdd(c->db,c->argv[1],lobj);
+    }
+    // 插入数据
+    for (j = 2; j < c->argc; j++) {
+        listTypePush(lobj,c->argv[j],where);
+        server.dirty++;
+    }
+
+    addReplyLongLong(c, listTypeLength(lobj));
+
+    char *event = (where == LIST_HEAD) ? "lpush" : "rpush";
+    signalModifiedKey(c,c->db,c->argv[1]);
+    notifyKeyspaceEvent(NOTIFY_LIST,event,c->argv[1],c->db->id);
+}
+```
+
+### 五大基本类型-Set
+
+Set不保证数据有序性，满足数据唯一性，要求查询高效率。
+
+- 为了查询效率和唯一性，采用HT编码（Dict）。Dict中的key用来存储元素，value为null
+- 当存储的数据都是整数且元素数量不超过set-max-intset-entries时，会采用IntSet编码，节省内存
+
+![image-20241002114732884](redis.assets/image-20241002114732884.png)
+
+### 五大基本类型-ZSet
+
+- 可以按照score排序
+- 元素唯一
+- 可以根据元素查询分数
+
+因此必须满足上面三个特性：
+
+- SkipList：可排序，可以键值存储
+- HT（Dict）：可以键值存储，可以根据key找value
+
+Zset会同时使用上面两种
+
+![image-20241002120009384](redis.assets/image-20241002120009384.png)
+
+缺点是内存占用过高，当满足下面的条件时会使用ZipList来节省内存
+
+1. 元素数量小于zset_max_ziplist_entries，默认128
+2. 每个元素都小于zet_max_ziplist_value字节，默认64
+
+![image-20241002120611323](redis.assets/image-20241002120611323.png)
+
+ZipList本身没有排序和键值对概念，通过业务逻辑实现功能：
+
+- score和element紧挨着放在两个entry里面，element在前，score在后
+- score越小越靠近队首，升序排序
+
+![image-20241002121040561](redis.assets/image-20241002121040561.png)
+
+### 五大基本类型-Hash
+
+- 键值存储
+- 都需要根据key获取值
+- 键必须唯一
+
+除了不需要排序，其他部分和zset很类似，所以去掉zset的跳表辅助排序的部分，就是hash的底层设计
+
+- 默认使用zipList编码，相邻entry分别保持field和value
+- 数量量大时转换为HT编码（Dict）
+  1. 元素数量超过hash_max_ziplist_entries，默认512
+  2. 每个元素都小于hash_max_ziplist_value字节，默认64
+
+Linux系统为了提高IO效率，会在用户空间和内核空间都加入缓冲区：
+
+- 写数据时，要把用户缓冲数据拷贝到内核缓冲区，然后写入设备
+- 读数据时，要从设备读取数据到内核缓冲区，然后拷贝到用户缓冲区
+
 ## Redis原理篇-网络模型
+
+### 用户空间和内核空间
+
+为了避免用户应用导致冲突甚至内核崩溃，用户应用和内核是分离的
+
+- 进程的寻址空间分为两部分：内核空间、用户空间
+- 用户空间只能执行受限的命令(Ring3)，不能直接调用系统资源，必须通过内核提供的接口来访问
+- 内核空间可以执行特权命令（Ring0），调用一切系统资源
+
+![image-20241002192127886](redis.assets/image-20241002192127886.png)
+
+### 阻塞IO
+
+用户进程在等待数据就绪和拷贝数据两个阶段都是阻塞的
+
+![image-20241002192846608](redis.assets/image-20241002192846608.png)
+
+### 非阻塞IO
+
+用户进程在等待数据就绪时不会阻塞,但是会一直重试,拷贝数据时阻塞
+
+![image-20241002193128766](redis.assets/image-20241002193128766.png)
+
+### IO多路复用
+
+传统的IO和非阻塞IO,一个线程在等待时,其他线程只能跟着等待,为了提高效率可以:
+
+- 方案一:多线程
+- 方案二:数据就绪了进程再去读取
+
+**文件描述符(File Description)**： 简称FD，是一个从0开始递增的无符号整数，用于描述Linux中的一个文件，因为万物皆文件，硬件设备和网络套接字（Socket）也是文件。
+
+**IO多路复用**：一个线程监听多个FD，并且在某个FD可读、可写时得到通知。避免无效等待，充分利用CPU资源
+
+![image-20241002194649995](redis.assets/image-20241002194649995.png)
+
+IO多路复用有三个常见模式: select,poll,epoll
+
+- select和poll只会通知用户进程FD就绪,但不确定具体是哪一个就绪了
+- epoll会在通知用户进程FD就绪的同时,将已经就绪的FD写入用户空间
+
+#### select
+
+![image-20241002195850426](redis.assets/image-20241002195850426.png)
+
+存在的问题:
+
+- 需要将整个fd_set从用户空间拷贝到内核空间
+- select无法得知具体就绪的fd,需要整个遍历fd_set
+- fd_set监听的fd数量不超过1024
+
+#### poll
+
+![image-20241002201112193](redis.assets/image-20241002201112193.png)
+
+#### epoll
+
+![image-20241002201828543](redis.assets/image-20241002201828543.png)
 
 ## Redis原理篇-通信协议
 
