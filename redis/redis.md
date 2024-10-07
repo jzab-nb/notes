@@ -7,6 +7,7 @@
 - set
 - sortedSet：geo
 - stream
+- list
 
 ### 缓存穿透，雪崩，击穿的原因和应对策略
 
@@ -55,12 +56,19 @@
 也可以用消息队列异步更新
 或者订阅 MySQL 的 binlog，再操作缓存
 
-Redis 底层数据结构和 IO 模型
-Redis 为什么快？只是因为在内存中操作吗？
-Redis 的有序集合为什么用跳表？
-Redis 大 Key 的危害以及如何避免和解决
-Redis 内存淘汰策略
-Redis 持久化机制
+### Redis 底层数据结构和 IO 模型
+
+### Redis 为什么快？只是因为在内存中操作吗？
+
+### Redis 的有序集合为什么用跳表？
+
+### Redis 大 Key 的危害以及如何避免和解决
+
+### Redis 内存淘汰策略
+
+### Redis 持久化机制
+
+
 
 ## Redis入门
 
@@ -3753,5 +3761,104 @@ Redis整体处理流程，其中命令解析和命令回复处理两个消耗IO�
 
 ## Redis原理篇-通信协议
 
+Redis是一个CS架构的软件，通信一般分为两步：
+
+1. 客户端向服务端发送一条命令
+2. 服务端解析并执行命令，返回响应结果给客户端
+
+客户端发送命令的格式，服务端想要的格式必须有规范，这个规范就是通信协议。
+
+Redis中使用的是RESP（Redis Serialization Protocol）协议：
+
+- Redis1.2引入了RESP协议
+- Redis2.0版本RESP成为标准，称为RESP2
+- Redis6.0升级为RESP3，增加了更多数据类型并且支持6.0的新特性-客户端缓存
+
+但是6.0默认还是RESP2，因为RESP3和旧版本不太兼容
+
+### Resp数据类型
+
+共五种，通过首字节的字符离开区分：
+
+- 单行字符串：'+'开头,CRLF"\r\n"结尾。不允许字符串内出现特殊字符,二进制不安全。一般用于服务端的简单返回结果。
+- 错误（Errors）：'-'开头,CRLF结尾
+- 数值: 冒号':'开头,CRLF结尾
+- 多行字符串:'$'开头,表示二进制安全的字符串,最大支持512MB,
+  - 第二个字节开始表示真正的字符串的长度
+  - 如果值是0代表空字符串
+  - 如果值是-1代表不存在
+- 数组:'*'开头,后面跟上数组元素个数,再跟上元素,元素数据类型不限制
+
+![image-20241005155836749](redis.assets/image-20241005155836749.png)
+
 ## Redis原理篇-内存策略
 
+### 过期策略
+
+通过expire设置过期时间，过期后数据被回收
+
+1. redis数据库有一个记录过期时间的dict，通过这个字典知道key的过期时间![image-20241007191434934](redis.assets/image-20241007191434934.png)
+
+2. Redis采用惰性删除和周期删除
+
+   惰性删除：在执行增删改查时,先判断是否过期,如果过期则删除。
+
+   周期删除：周期性的抽样过期的key，然后执行删除
+
+   - Redis会设置一个定时任务serverCron(),按照server.hz的频率来执行过期key的清理,模式为SLOW
+   - Redis的每个事件循环前都会调用beforeSleep()函数,执行过期key的清理,模式为FAST
+
+![image-20241007192515457](redis.assets/image-20241007192515457.png)
+
+SLOW模式规则:
+
+1. 执行频率受server.hz影响,默认为10,每秒执行10次,每个周期100ms
+2. 执行清理耗时不超过一次执行周期的25%
+3. 逐个遍历db,逐个遍历db中的bucket,抽取20个key判断是否过期
+4. 如果没有达到上限(25ms),并且key比例大于10%,再进行一次抽样,否则结束
+
+FAST模式:
+
+1. 执行频率受beforeSleep()调用频率影响,但两次FAST模式间隔不低于2ms
+2. 执行清理耗时不超过1ms
+3. 逐个遍历db,逐个遍历db中的bucket,抽取20个key判断是否过期
+4. 如果没达到时间上限(1ms)并且过期key比例大于10%,则再执行一次抽样,否则结束
+
+### 内存淘汰策略
+
+当redis的内存达到设置的阈值时,Redis主动挑选部分key删除以释放更多内存的流程。
+
+Redis会在处理客户端命令的方法processCommand()中尝试做内存淘汰
+
+![image-20241007193915352](redis.assets/image-20241007193915352.png)
+
+redis支持八种内存淘汰策略,可以通过maxmemory-policy来设置策略,默认是noeviction
+
+1. noeviction:不删除任何key,内存满时不允许写入
+2. volatile-ttl:对设置了TTL的key,比较剩余值,剩余值小的先删除
+3. allkeys-random: 对全体key进行随机淘汰 db->dict
+4. volatile-random: 对设置了TTL的key进行随机淘汰  db->expires
+5. allkeys-lru:对全体key基于LRU算法进行淘汰
+6. volatile-lru: 对设置了TTL的key,基于LRU算法进行淘汰
+7. allkeys-lfu: 对全体key,基于LFU进行淘汰
+8. volatile-lfu: 对设置了过期时间的key,基于LFU进行淘汰
+
+LRU和LFU:
+
+- LRU(Least Recently Used),最少最近使用.用当前时间减去最后一次访问时间,值越大越容易被淘汰
+- LFU(Least Frequently Used),最少频率使用。会统计每个key的访问频率,值越小越容易被淘汰。
+
+LRU和LFU需要的数据会被放在RedisObject中
+
+![image-20241007194811516](redis.assets/image-20241007194811516.png)
+
+LFU记录的是逻辑访问次数：
+
+1. 生成0-1之间的随机数R
+2. 计算1/(旧次数*lfu_log_factor+1) 记录为P,lfu_log_factor默认为10
+3. 如果R<P,则计数器+1,且最大不超过255
+4. 访问次数会随着时间衰减,距离上一次访问时间每隔lfu_decay_time分钟(默认1),计数器-1
+
+![image-20241007200230893](redis.assets/image-20241007200230893.png)
+
+eviction_pool 按照值进行升序排列,最大的淘汰
