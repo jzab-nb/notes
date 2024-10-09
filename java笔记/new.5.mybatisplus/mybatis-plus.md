@@ -67,6 +67,7 @@ class User{
 
 ```java
 // 传入的type可以指定类型，AUTO为数据库自增，INPUT为通过set方法自行传入，ASSIGN_ID为通过IdentifierGenerator接口的nextId来生成Id，默认实现是雪花算法
+// 如果不指定type,默认是ASSIGN_ID
 @TableId(value="主键名", type=IdType.类型)
 private int id;
 
@@ -79,7 +80,7 @@ is开头的字段需要用TableField指定字段名否则可能出错
 属性名和数据库关键字冲突时要指定
 
 ```java
-@TableField(value="字段名")
+@TableField(value="`字段名`")
 private Long result;
 
 // 成员变量不是数据库字段时
