@@ -87,6 +87,14 @@ private Long result;
 @TableFiele(exist = false)
 ```
 
+### 常用配置
+
+```yaml
+
+```
+
+
+
 ### Service类实现
 
 Service接口继承IService类，泛型传入实体类
