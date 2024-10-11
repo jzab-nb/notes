@@ -36,15 +36,45 @@
        password: 密码
    
    mybatis-plus:
+     type-aliases-package: xyz.jzab.mp.pojo.entity # 别名扫描包
+     mapper-locations: "classpath*:/mapper/**/*.xml" # xml文件目录
      configuration:
-       map-underscore-to-camel-case: false
-       log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+       map-underscore-to-camel-case: true # 是否开启下划线转驼峰
+       cache-enabled: false # 是否开启二级缓存
+       log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 日志实现
      global-config:
        db-config:
-         logic-delete-field: isDelete
+         logic-delete-field: isDelete # 逻辑删除字段和逻辑删除值
          logic-delete-value: 1
          logic-not-delete-value: 0
+         update-strategy: not_null # 默认的更新策略(非空字段才更新)
+         id-type: assign_id # 默认的主键策略: 雪花算法
    ```
+
+4. 实现service接口
+
+   Service接口继承IService类，泛型传入实体类
+
+   ```java
+   public interface UserService extends IService<User> {
+   
+   }
+   ```
+
+   
+
+   实现类继承ServiceImpl，泛型传入Mapper接口和实体类，实现UserService接口
+
+   ```java
+   @Service
+   public class UserServiceImpl extends ServiceImpl<UserMapper, User>
+       implements UserService{
+   
+   }
+   
+   ```
+
+   
 
 ### 常用注解
 
@@ -90,31 +120,57 @@ private Long result;
 ### 常用配置
 
 ```yaml
-
+mybatis-plus:
+  type-aliases-package: xyz.jzab.mp.pojo.entity # 别名扫描包
+  mapper-locations: "classpath*:/mapper/**/*.xml" # xml文件目录
+  configuration:
+    map-underscore-to-camel-case: true # 是否开启下划线转驼峰
+    cache-enabled: false # 是否开启二级缓存
+  global-config:
+    db-config:
+      update-strategy: not_null # 默认的更新策略(非空字段才更新)
+      id-type: assign_id # 默认的主键策略: 雪花算法
 ```
 
 
 
-### Service类实现
+## 条件构造器
 
-Service接口继承IService类，泛型传入实体类
+QueryWrapper用来构造Select,Update,Delete的条件部分
 
-```java
-public interface UserService extends IService<User> {
+UpdateWrapper一般在需要定制更新的set部分时使用
 
-}
-```
+建议使用Lambda开头的Wrapper
 
+## 自定义Sql
 
+使用mp生成where部分，其他部分自定义
 
-实现类继承ServiceImpl，泛型传入Mapper接口和实体类，实现UserService接口
+1. 基于mp生成where条件
 
-```java
-@Service
-public class UserServiceImpl extends ServiceImpl<UserMapper, User>
-    implements UserService{
+   ```java
+   QueryWrapper<User> idWrapper = new QueryWrapper<User>( ).le("id", 2);
+   ```
 
-}
+2. 将wrapper传递给mapper层的自定义方法
 
-```
+   注意: 传的名字一定要是ew
+
+   ```java
+   List<User> getByWrapper(@Param("ew")QueryWrapper<User> wrapper);
+   
+   System.out.println(userMapper.getByWrapper(idWrapper));
+   ```
+
+3. 在mapper.xml中使用传递的条件
+
+   ```xml
+   <select id="getByWrapper" resultType="xyz.jzab.mp.pojo.entity.User">
+       select * from user ${ew.customSqlSegment}
+   </select>
+   ```
+
+   
+
+   
 
