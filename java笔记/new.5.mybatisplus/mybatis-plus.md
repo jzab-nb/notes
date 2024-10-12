@@ -39,6 +39,7 @@
      type-aliases-package: xyz.jzab.mp.pojo.entity # 别名扫描包
      mapper-locations: "classpath*:/mapper/**/*.xml" # xml文件目录
      configuration:
+       default-enum-type-handler: com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler # 默认枚举处理器
        map-underscore-to-camel-case: true # 是否开启下划线转驼峰
        cache-enabled: false # 是否开启二级缓存
        log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 日志实现
@@ -170,7 +171,130 @@ UpdateWrapper一般在需要定制更新的set部分时使用
    </select>
    ```
 
-   
+## Service层接口
 
+deleteByIds和deleteBatchByIds区别:
+
+- 前者使用IN语法
+- 后者使用=语法,大数据量时更快
+
+update(),query()等方法返回的是链式调用,更加方便
+
+在jdbcUrl后拼接 ```&rewriterBatchedStatements=true``` 可以实现真正的批量插入
+
+## 代码生成
+
+插件商城搜索MyBatisX或MyBatisPlus
+
+![image-20241011205722760](mybatis-plus.assets/image-20241011205722760.png)
+
+## 静态工具类
+
+Db 里面函数实现的功能和IService类似
+
+为了防止多个Service相互调用出现循环依赖
+
+## 逻辑删除
+
+用一个字段标记数据行是否被删除，查询时判断标记
+
+逻辑删除存在的问题:
+
+1. 产生太多垃圾数据
+2. 查询时多一个条件,影响查询性能
+
+可以的替代方案: 删除之前把数据存入其他库
+
+## 枚举处理器
+
+1. 在枚举类上配置注解
+
+   ```java
+   public enum UserRole {
+       ADMIN("admin",3),
+       TEACHER("teacher",2),
+       STUDENT("student",1),
+       USER("loginUser",0);
    
+       @EnumValue // 标记数据库值
+       @JsonValue // 标记返回给前端的值
+       private final String desc;
+       private final int code;
+   
+       UserRole(String desc, int code){
+           this.desc = desc;
+           this.code = code;
+       }
+   
+       public String getDesc() {
+           return desc;
+       }
+   
+       public int getCode() {
+           return code;
+       }
+   }
+   ```
+
+2. 在yaml中配置
+
+   ```yml
+   mybatis-plus:
+     configuration:
+       default-enum-type-handler: com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler
+   ```
+
+## Json处理器
+
+1. 实体类上配置开启自动结果映射
+
+   ```java
+   @TableName(value ="paper",autoResultMap = true)
+   ```
+
+2. 属性上配置Json处理器类型
+
+   ```java
+   @TableField(typeHandler = JacksonTypeHandler.class)
+   private List<Integer> questionList;
+   ```
+
+## 分页插件
+
+1. 将MybatisPlus的插件注册到Bean
+
+   ```java
+   /**
+    * MyBatis Plus 配置
+    *
+    */
+   @Configuration
+   public class MyBatisPlusConfig {
+   
+       /**
+        * 拦截器配置
+        *
+        * @return
+        */
+       @Bean
+       public MybatisPlusInterceptor mybatisPlusInterceptor() {
+           MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
+           // 分页插件
+           PaginationInnerInterceptor page = new PaginationInnerInterceptor(DbType.MYSQL);
+           // 可以设置大小限制
+           page.setMaxLimit(1000L);
+           interceptor.addInnerInterceptor(page);
+           return interceptor;
+       }
+   }
+   ```
+
+2. 使用Page对象来进行分页查询
+
+   ```java
+   // 获取page对象
+   Page.of(页码,页大小);
+   ```
+
+## 通用分页实体类转换
 
