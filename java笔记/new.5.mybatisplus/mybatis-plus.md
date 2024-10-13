@@ -298,3 +298,70 @@ Db 里面函数实现的功能和IService类似
 
 ## 通用分页实体类转换
 
+分页的请求和把请求转为Page类的方法
+
+```java
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class PageRequest {
+    // 当前页
+    private Integer current;
+    // 页面大小
+    private Integer size;
+    // 排序字段
+    private String orderBy;
+    // 是否降序
+    private Boolean desc;
+
+    public <T> Page<T> getPageObj(OrderItem ... orderItems){
+        Page<T> page = Page.of(current, size);
+        // 若设置了排序字段,则排序
+        if(!StringUtils.isEmpty(orderBy)){
+            page.addOrder(OrderItem.asc(orderBy));
+        }else{
+        // 否则按照传进来的排序
+            page.addOrder(orderItems);
+        }
+        return page;
+    }
+}
+```
+
+
+
+分页的返回结果和把Page类转为自定义的返回结果的方法
+
+```java
+// 分页的返回结果
+public class  PageResult<T> {
+    // 总条数
+    private Long total;
+    // 总页数
+    private Long pages;
+    // 数据
+    private List<T> records;
+    // 将数据转为统一的分页结果
+    public static <P,T> PageResult<T> toPageResult(Page<P> page,Class<T> tClass){
+        PageResult<T> result = new PageResult<T>();
+        result.total = page.getTotal();
+        result.pages = page.getPages();
+
+        result.records = BeanUtil.copyToList(page.getRecords(),tClass);
+
+        return result;
+    }
+
+    public static <P,T> PageResult<T> toPageResult(Page<P> page, Class<T> tClass, Function<P,T> func){
+        PageResult<T> result = new PageResult<T>();
+        result.total = page.getTotal();
+        result.pages = page.getPages();
+
+        result.records = page.getRecords().stream( ).map(func).collect(Collectors.toList( ));
+
+        return result;
+    }
+}
+
+```
+
