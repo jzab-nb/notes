@@ -121,3 +121,161 @@ Spring提供的 RestTemplate 可以发送Http请求
 
 ### Nacos
 
+#### 服务注册
+
+1. 引入maven依赖
+
+   ```xml
+   <dependency>
+       <groupId>com.alibaba.cloud</groupId>
+       <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+   </dependency>
+   ```
+
+2. 配置注册中心地址
+
+   ```yml
+   spring:
+     application:
+       name: item-service
+     cloud:
+       nacos:
+         server-addr: 192.168.128.128:8848
+   ```
+
+#### 服务发现
+
+1. 引入maven依赖
+
+   ```xml
+   <dependency>
+       <groupId>com.alibaba.cloud</groupId>
+       <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+   </dependency>
+   ```
+
+2. 配置注册中心地址
+
+   ```yml
+   spring:
+     application:
+       name: item-service
+     cloud:
+       nacos:
+         server-addr: 192.168.128.128:8848
+   ```
+
+3. 调用API获取实例信息
+
+   ```java
+   @Resource
+   DiscoveryClient discoveryClient;
+   
+   private void handleCartItems(List<CartVO> vos) {
+       // 获取服务列表
+       List<ServiceInstance> instances = discoveryClient.getInstances("item-service");
+       // 负载均衡获取其中一个实例
+       ServiceInstance instance = instances.get(RandomUtil.randomInt(instances.size()));
+       // 获取实例的uri
+       URI uri = instance.getUri();
+   }
+   ```
+
+### OpenFeign
+
+OpenFeign是一个声明式的http客户端
+
+#### 快速入门
+
+1. 导入依赖
+
+   ```xml
+   <dependency>
+       <groupId>org.springframework.cloud</groupId>
+       <artifactId>spring-cloud-starter-openfeign</artifactId>
+   </dependency>
+   
+   <dependency>
+       <groupId>org.springframework.cloud</groupId>
+       <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+   </dependency>
+   ```
+
+2. 在启动类开启OpenFeign
+
+   ```java
+   @EnableFeignClients
+   public class CartApplication {
+   	...
+   }
+   ```
+
+3. 编写FeignClient
+
+   ```java
+   @FeignClient("item-service")
+   public interface ItemClient {
+       @GetMapping("/items")
+       List<ItemDTO> queryItemByIds(@RequestParam("ids") Collection<Long> ids);
+   }
+   ```
+
+4. 使用FeignClient
+
+   ```java
+   @Resource
+   // 依赖注入
+   ItemClient itemClient;
+   
+   private void handleCartItems(List<CartVO> vos) {
+   
+       // 1.获取商品id
+       Set<Long> itemIds = vos.stream().map(CartVO::getItemId).collect(Collectors.toSet());
+       // 2.查询商品
+       List<ItemDTO> items = itemClient.queryItemByIds(itemIds);
+   }
+   ```
+
+#### 连接池
+
+OpenFeign对Http请求做了优雅的封装，不过它底层发起Http请求依赖于其他的框架。共有以下三种：
+
+- HttpURLConnection：默认实现，不支持连接池
+- Apache HttpClient：支持连接池
+- OKHttp：支持连接池
+
+具体源码可以参考FeignBlockingLoadBalancerClient类中的delegate变量
+
+1. 引入依赖
+
+   ```xml
+   <dependency>
+       <groupId>io.github.openfeign</groupId>
+       <artifactId>feign-okhttp</artifactId>
+   </dependency>
+   ```
+
+2. 开启连接池功能
+
+   ```yml
+   feign:
+     okhttp:
+       enabled: true
+   ```
+
+#### 最佳实践
+
+方案一：服务提供者拆分模块，将DTO和Client接口放在子模块中
+
+![image-20241016211208988](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241016211208988.png)
+
+方案二：开一个通用的api模块，将所有的DTO和要暴露的接口放在这个模块内
+
+![image-20241016211327555](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241016211327555.png)
+
+采用这两种方案的时候需要配置Feign扫描包
+
+```java
+@EnableFeignClients(basePackages = "com.hmall.api.client")
+```
+
