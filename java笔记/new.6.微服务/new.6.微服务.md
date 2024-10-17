@@ -279,3 +279,40 @@ OpenFeign对Http请求做了优雅的封装，不过它底层发起Http请求依
 @EnableFeignClients(basePackages = "com.hmall.api.client")
 ```
 
+#### 日志
+
+OpenFeign只会在FeignClient所在的包的日志级别是DEBUG时才会输出日志。而且日志级别有四级：
+
+- **NONE**：不记录任何日志，默认值
+- **BASIC**：仅记录请求的方法，URL以及响应状态码和执行时间
+- **HEADERS**：在BASIC的基础上，额外记录了请求和响应的头信息
+- **FULL**：记录所有请求和响应的明细，包括头信息、请求体、元数据。
+
+Feign默认的日志级别就是NONE，所以默认我们看不到请求日志。
+
+1. 配置日志级别
+
+```java
+import feign.Logger;
+import org.springframework.context.annotation.Bean;
+/**
+ * @author JZAB
+ * @from http://vip.jzab.xyz
+ */
+public class LogConfig {
+    @Bean
+    public Logger.Level feignLogLevel(){
+        return Logger.Level.FULL;
+    }
+}
+```
+
+2. 配置日志生效
+
+```java
+// 局部生效
+@FeignClient(value = "item-service",configuration = LogConfig.class)
+// 全局生效
+@EnableFeignClients(basePackages = "com.hmall.api.client",defaultConfiguration = LogConfig.class)
+```
+
