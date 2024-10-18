@@ -316,3 +316,8 @@ public class LogConfig {
 @EnableFeignClients(basePackages = "com.hmall.api.client",defaultConfiguration = LogConfig.class)
 ```
 
+## 作业: 订单,支付,用户三个模块
+
+- user-service：用户微服务，包含用户登录、管理等功能
+- trade-service：交易微服务，包含订单相关功能
+- pay-service：支付微服务，包含支付相关功能
