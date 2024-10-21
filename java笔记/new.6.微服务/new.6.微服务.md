@@ -316,3 +316,218 @@ public class LogConfig {
 @EnableFeignClients(basePackages = "com.hmall.api.client",defaultConfiguration = LogConfig.class)
 ```
 
+### 网关
+
+负责请求的路由、转发、身份校验
+
+SpringCloudGateway
+
+- spring官方出品
+- 基于WebFlux响应式编程
+- 无需调优即可获得优异性能
+
+Netfilx Zuul
+
+- Netflix出品
+- 基于Servlet的阻塞式编程
+- 需要调优才能获得和Gateway类似的性能
+
+#### 路由配置
+
+1. 导入相关依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-gateway</artifactId>
+</dependency>
+
+<!--服务注册发现-->
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+</dependency>
+<!--负载均衡-->
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+</dependency>
+```
+
+2. yml文件配置路由
+
+```yml
+spring:
+ cloud:
+   gateway:
+     routes:
+     - id: route1 # 微服务的ID
+       uri: lb://微服务名字 # 转发的地址,lb代表负载均衡,也可以传递http地址
+       predicates: # 匹配规则,有xxx开头的路径会匹配上,可以用逗号分隔配置多个,也可以换行配置多个
+       - Path=/xxx/**,/search/**
+       filters: # 过滤器,
+       - AddRequestHeader=ab, 114514
+     default-filters: # 默认过滤器,所有路由都生效
+       - AddRequestHeader=ab, 114514
+```
+
+##### **路由断言**
+
+![image-20241021194054773](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241021194054773.png)
+
+##### **路由过滤器**
+
+![image-20241021194217930](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241021194217930.png)
+
+##### **网关处理流程**
+
+![image-20241021195152535](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241021195152535.png)
+
+##### 自定义过滤器  
+
+网关的过滤器有两种:
+
+- GateWayFilter：路由过滤器，作用于任意指定的路由，默认不生效，要配置到路由后生效
+- GlobalFilter：全局过滤器，作用于所有的路由，声明后自动生效。
+
+**自定义全局过滤器**
+
+```java
+// 注册成Spring组件
+@Component
+public class MyGlobalFilter implements GlobalFilter, Ordered {
+    @Override
+    // 主要实现过滤的方法  
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        // 获取请求头
+        exchange.getRequest().getHeaders().get("token");
+        // 过滤器放行
+        return chain.filter(exchange);
+    }
+
+    @Override
+    // 排序,值越小越优先执行
+    public int getOrder() {
+        return 0;
+    }
+}
+
+```
+
+**自定义路由过滤器**
+
+不能直接定义,而是要定义工厂类
+
+且工厂类的后缀必须为GatewayFilterFactory
+
+前缀则会变成配置在yml文件中的部分
+
+```java
+@Component
+@Slf4j
+// 定义工厂类
+public class AbGatewayFilterFactory extends AbstractGatewayFilterFactory<AbGatewayFilterFactory.Config> {
+
+    @Override
+    // 返回实际的过滤器
+    public GatewayFilter apply(Config config) {
+        // 利用装饰模式实现排序
+        return new OrderedGatewayFilter((exchange, chain) -> {
+            log.error("{}-{}",config,exchange.getRequest().getURI());
+            return chain.filter(exchange);
+        },1);
+    }
+
+    @Data
+    // 定义存储配置内容的类
+    public static class Config{
+        private String name;
+        private Integer age;
+    }
+
+    @Override
+    // 定义参数位置和变量的映射关系
+    public List<String> shortcutFieldOrder() {
+        return List.of("name","age");
+    }
+
+    // 构造函数,调用父类的构造函数,并把配置类传入
+    public AbGatewayFilterFactory(){
+        super(Config.class);
+    }
+}
+```
+
+yml文件配置
+
+```yml
+default-filters:
+	- Ab=JZAB,100
+```
+
+
+
+### 登录校验
+
+```java
+// 注册成Spring组件
+@Component
+@Slf4j
+public class MyGlobalFilter implements GlobalFilter, Ordered {
+    @Resource
+    AuthProperties authProperties;
+
+    @Resource
+    JwtTool jwtTool;
+
+    @Resource
+    AntPathMatcher antPathMatcher = new AntPathMatcher(  );
+
+    public boolean checkPath(String path){
+        List<String> include = authProperties.getIncludePaths();
+        List<String> exclude = authProperties.getExcludePaths();
+        // 是否允许放行
+        for (String p : exclude) {
+            if(antPathMatcher.match(p,path)) return true;
+        }
+        return false;
+    }
+
+    @Override
+    // 主要实现过滤的方法
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        log.error("{}",exchange.getRequest( ).getHeaders( ));
+        // 1.获取请求头
+        ServerHttpRequest request = exchange.getRequest( );
+        // 2.判断是否允许放行
+        String path = request.getURI().getPath();
+        if(checkPath(path)) return chain.filter(exchange);
+
+        log.error(jwtTool.createToken(1L, Duration.ofMinutes(100)));
+        // 3.获取token
+//        String token = request.getHeaders( ).getFirst("authorization");
+        String token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJ1c2VyIjoxLCJleHAiOjE3Mjk1MjQwMDJ9.IgNtD0QE1woZ0bs7ADC75pXFm0QZ0Sgx8CdkNsektu2hcCrq342PuMREmBscpjTVWKCyPCM5oORXXRPWbAuHqQYvLUeqU6pKTfgZJv2H7hB7frsI9iWCgOEmdiRiTyvf-lqstNZNy7yDZ4ZwC1h1AL071nVI5mihcsU_UA1EDSx91fZMM6x90Dsmvbb7wjiIxr1dLj1KC-C9q7pSz4iOV41KMYZcBSCFerU_g9Q0N6pK1xHeh2ELi3odLSMiZkadGjZAJN6CPGMrgyIZps8Z3Djj6f93uPlcPtV1yyrB3E0ZOqvGoNz6WmrwZRVUP5bJmErqxhvV0NOmUB7RWRAPXw";
+        try{
+            // 4.解析token
+            Long id = jwtTool.parseToken(token);
+            // 5.传递用户信息
+            log.error("{}",id);
+        }catch (Exception e){
+            // 产生异常了,返回401
+            ServerHttpResponse response = exchange.getResponse( );
+            response.setStatusCode(HttpStatus.UNAUTHORIZED);
+            return response.setComplete();
+        }
+
+        // 6.放行
+        return chain.filter(exchange);
+    }
+
+    @Override
+    // 排序,值越小越优先执行
+    public int getOrder() {
+        return 0;
+    }
+}
+```
+
