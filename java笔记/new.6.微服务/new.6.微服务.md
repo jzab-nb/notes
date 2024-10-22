@@ -469,6 +469,8 @@ default-filters:
 
 ### 登录校验
 
+1. 在网关部分配置过滤器，处理token并将信息写入请求头
+
 ```java
 // 注册成Spring组件
 @Component
@@ -480,8 +482,7 @@ public class MyGlobalFilter implements GlobalFilter, Ordered {
     @Resource
     JwtTool jwtTool;
 
-    @Resource
-    AntPathMatcher antPathMatcher = new AntPathMatcher(  );
+    private final AntPathMatcher antPathMatcher = new AntPathMatcher(  );
 
     public boolean checkPath(String path){
         List<String> include = authProperties.getIncludePaths();
@@ -496,29 +497,31 @@ public class MyGlobalFilter implements GlobalFilter, Ordered {
     @Override
     // 主要实现过滤的方法
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        log.error("{}",exchange.getRequest( ).getHeaders( ));
+        log.error("{}",exchange.getRequest( ).getURI());
         // 1.获取请求头
         ServerHttpRequest request = exchange.getRequest( );
         // 2.判断是否允许放行
         String path = request.getURI().getPath();
         if(checkPath(path)) return chain.filter(exchange);
 
-        log.error(jwtTool.createToken(1L, Duration.ofMinutes(100)));
         // 3.获取token
-//        String token = request.getHeaders( ).getFirst("authorization");
-        String token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJ1c2VyIjoxLCJleHAiOjE3Mjk1MjQwMDJ9.IgNtD0QE1woZ0bs7ADC75pXFm0QZ0Sgx8CdkNsektu2hcCrq342PuMREmBscpjTVWKCyPCM5oORXXRPWbAuHqQYvLUeqU6pKTfgZJv2H7hB7frsI9iWCgOEmdiRiTyvf-lqstNZNy7yDZ4ZwC1h1AL071nVI5mihcsU_UA1EDSx91fZMM6x90Dsmvbb7wjiIxr1dLj1KC-C9q7pSz4iOV41KMYZcBSCFerU_g9Q0N6pK1xHeh2ELi3odLSMiZkadGjZAJN6CPGMrgyIZps8Z3Djj6f93uPlcPtV1yyrB3E0ZOqvGoNz6WmrwZRVUP5bJmErqxhvV0NOmUB7RWRAPXw";
+        String token = request.getHeaders( ).getFirst("authorization");
         try{
             // 4.解析token
             Long id = jwtTool.parseToken(token);
             // 5.传递用户信息
             log.error("{}",id);
+            // 构建请求头并获取新的exchange
+            exchange = exchange.mutate( ).request(
+                    req -> req.header("user-id", id.toString( ))
+            ).build( );
+
         }catch (Exception e){
             // 产生异常了,返回401
             ServerHttpResponse response = exchange.getResponse( );
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
             return response.setComplete();
         }
-
         // 6.放行
         return chain.filter(exchange);
     }
@@ -530,4 +533,169 @@ public class MyGlobalFilter implements GlobalFilter, Ordered {
     }
 }
 ```
+
+2. 在公共模块书写拦截器相关配置
+
+拦截器
+
+```java
+public class UserIdInterceptor implements HandlerInterceptor {
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // 获取用户ID
+        String id = request.getHeader("user-id");
+        System.out.println("id="+id );
+        // 不为空则保存用户信息
+        if(StrUtil.isNotBlank(id)){
+            UserContext.setUser(Long.valueOf(id));
+        }
+        return true;
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
+        UserContext.removeUser();
+    }
+}
+```
+
+MVC配置类
+
+```java
+@Configuration
+// 条件,当有SpringMVC时才引入
+@ConditionalOnClass(DispatcherServlet.class)
+public class MvcConfig implements WebMvcConfigurer {
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new UserIdInterceptor());
+    }
+}
+```
+
+自动装配配置文件 resources/META-INF/spring.factories
+
+```factoris
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+  com.hmall.common.config.MyBatisConfig,\
+  com.hmall.common.config.JsonConfig,\
+  com.hmall.common.config.MvcConfig
+```
+
+feign的拦截器配置，使用Feign发送请求时会带上请求头
+
+```java
+@Bean
+public RequestInterceptor requestInterceptor(){
+    return requestTemplate -> {
+        Long user = UserContext.getUser( );
+        if(user!=null) requestTemplate.header("user-id", user.toString());
+    };
+}
+```
+
+### 配置管理
+
+不同微服务之间重复的配置过多
+
+有些配置是业务配置经常变动
+
+网关路由配置可能存在变动
+
+#### 配置共享
+
+在nacos的界面上进行配置，将application.yml中的配置按模块划分
+
+${}代表变量,里面可以用冒号指定默认值
+
+```yml
+spring:
+  datasource:
+    url: jdbc:mysql://${hm.db.host:192.168.128.128}:${hm.db.port:3306}/${hm.db.database}?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${hm.db.un:root}
+    password: ${hm.db.pw:102099}
+mybatis-plus:
+  configuration:
+    default-enum-type-handler: com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler
+  global-config:
+    db-config:
+      update-strategy: not_null
+      id-type: auto
+```
+
+![image-20241022212542327](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241022212542327.png)
+
+要想让共享配置生效，还需要进行如下操作
+
+1. 引入依赖
+
+   ```xml
+   <!--配置管理-->
+   <dependency>
+       <groupId>com.alibaba.cloud</groupId>
+       <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+   </dependency>
+   <!--读取bootstrap文件-->
+   <dependency>
+       <groupId>org.springframework.cloud</groupId>
+       <artifactId>spring-cloud-starter-bootstrap</artifactId>
+   </dependency>
+   ```
+
+2. 新建bootstrap.yml文件
+
+   ```yml
+   spring:
+     application:
+       name: item-service
+     profiles:
+       active: dev
+     cloud:
+       nacos:
+         server-addr: 192.168.128.128:8848
+         config:
+           file-extension: yaml # 文件后缀名
+           shared-configs: # 共享配置
+             - dataId: shared-jdbc.yaml
+             - dataId: shared-log.yaml
+             - dataId: shared-swagger.yaml
+   ```
+
+3. 精简application.yml文件
+
+   ```yml
+   server:
+     port: 8081
+   hm:
+     db:
+       database: hm-item
+     swagger:
+       title: "黑马商城商品服务接口文档"
+       desc: "黑马商城订单服务接口文档"
+       package: com.hmall.item.controller
+   ```
+
+#### 配置热更新
+
+修改完配置后不需要重启变动就能生效。
+
+前提条件:
+
+1. nacos上要有一个和微服务相关的配置文件 命名规则: 服务名[-活动配置文件].后缀 例如: item-service-dev.yaml
+
+2. 要用特定的方式读取要热更新的属性
+
+   ```java
+   @Data
+   @ConfigurationProperties(prefix = "hm.jwt")
+   public class JwtProperties {
+   
+   }
+   
+   ```
+
+   
+
+#### 动态路由
 
