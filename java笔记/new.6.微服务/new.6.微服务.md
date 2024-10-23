@@ -682,20 +682,170 @@ mybatis-plus:
 
 前提条件:
 
-1. nacos上要有一个和微服务相关的配置文件 命名规则: 服务名[-活动配置文件].后缀 例如: item-service-dev.yaml
+1. nacos上要有一个和微服务相关的配置文件 命名规则: 服务名[-活动配置文件].后缀 例如: cart-service-dev.yaml
 
 2. 要用特定的方式读取要热更新的属性
 
    ```java
+   @Component
+   @ConfigurationProperties(prefix = "hm.cart")
    @Data
-   @ConfigurationProperties(prefix = "hm.jwt")
-   public class JwtProperties {
-   
+   public class CartConfig {
+       private Integer max=10;
    }
-   
    ```
 
+3. 在代码中直接引用该配置即可
+
+   ```java
+   @Resource
+   CartConfig cartConfig;
    
+   private void checkCartsFull(Long userId) {
+       cartConfig.getMax()
+   }
+   ```
+
+4. 修改 cart-service-dev.yaml 配置文件的内容发布后会动态更新
+
+   ```yaml
+   hm:
+     cart:
+       max: 15
+   ```
 
 #### 动态路由
+
+两个要点:
+
+1. 监听配置信息变更
+2. 将变更更新到网关路由表
+
+具体实现:
+
+1. java代码
+
+```java
+@Component
+@Slf4j
+public class DynamicRouterLoader {
+    // nacos动态配置管理
+    @Resource
+    NacosConfigManager nacosConfigManager;
+    // 路由配置修改
+    @Resource
+    RouteDefinitionWriter writer;
+    // 记录上一次的路由ID
+    private Set<String> ids = new HashSet<>();
+    // 配置文件名和组名
+    private final String dataId = "gateway-routes.json";
+    private final String groupId = "DEFAULT_GROUP";
+
+    @PostConstruct
+    // Bean初始化后执行
+    public void run() throws NacosException {
+        // 获取一次配置并注册监听器,配置变更时就更新路由
+        String s = nacosConfigManager.getConfigService( ).getConfigAndSignListener(
+                dataId, groupId, 5000, new Listener( ) {
+                    @Override
+                    public Executor getExecutor() {
+                        return null;
+                    }
+
+
+                    @Override
+                    public void receiveConfigInfo(String s) {
+                        // 监听到配置变更,更新到路由表
+                        updateConfig(s);
+                    }
+                }
+        );
+        // 第一次启动也需要更新路由表
+        updateConfig(s);
+    }
+
+    // 实际更新路由
+    public void updateConfig(String s){
+        log.info("监听到路由配置:{}",s);
+        // 解析配置
+        List<RouteDefinition> routeDefinitions = JSONUtil.toList(s, RouteDefinition.class);
+        // 旧的全部删除
+        ids.forEach(id -> writer.delete(Mono.just(id)));
+        ids.clear();
+        // 新路由全部写入
+        for (RouteDefinition routeDefinition : routeDefinitions) {
+            writer.save(Mono.just(routeDefinition)).subscribe();
+            // 记录路由ID,便于下一次删除
+            ids.add(routeDefinition.getId());
+        }
+    }
+}
+
+```
+
+2. 路由配置文件
+
+```json
+[
+    {
+        "id":"item-service",
+        "uri":"lb://item-service",
+        "predicates": [{
+            "name":"Path",
+            "args":{
+                "_genkey_0":"/items/**",
+                "_genkey_1":"/search/**"
+            }
+        }],
+        "filters":[]
+    },
+    {
+        "id":"user-service",
+        "uri":"lb://user-service",
+        "predicates": [{
+            "name":"Path",
+            "args":{
+                "_genkey_0":"/users/**",
+                "_genkey_1":"/addresses/**"
+            }
+        }],
+        "filters":[]
+    },
+    {
+        "id":"cart-service",
+        "uri":"lb://cart-service",
+        "predicates": [{
+            "name":"Path",
+            "args":{
+                "_genkey_0":"/carts/**"
+            }
+        }],
+        "filters":[]
+    },
+    {
+        "id":"trade-service",
+        "uri":"lb://trade-service",
+        "predicates": [{
+            "name":"Path",
+            "args":{
+                "_genkey_0":"/orders/**"
+            }
+        }],
+        "filters":[]
+    },
+    {
+        "id":"pay-service",
+        "uri":"lb://pay-service",
+        "predicates": [{
+            "name":"Path",
+            "args":{
+                "_genkey_0":"/pay-orders/**"
+            }
+        }],
+        "filters":[]
+    }
+]
+```
+
+## 服务保护和分布式事务
 
