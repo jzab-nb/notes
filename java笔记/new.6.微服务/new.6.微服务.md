@@ -849,3 +849,62 @@ public class DynamicRouterLoader {
 
 ## 服务保护和分布式事务
 
+### 雪崩问题
+
+调用链路中，某个服务故障，引起整个链路中的所有微服务都不可用，这就是雪崩。 
+
+产生原因:
+
+1. 微服务互相调用,服务提供者出现故障 
+2. 服务调用者没有做好异常处理,导致自身故障
+3. 调用链路中所有服务级联失败,导致整个集群故障
+
+解决思路:
+
+1. 请求限流：限制访问微服务的请求的并发量，避免因流量激增出现故障
+2. 线程隔离：限制每个业务能使用的线程数量，实现故障业务隔离，避免故障扩散。
+3. 服务熔断：由断路器统计请求的一场比例或慢调用比例，如果超出阈值会熔断该业务，则拦截该系欸口的请求。熔断期间，所有的请求会快速失败，全部走fallback逻辑。 
+
+![image-20241024194600258](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241024194600258.png)
+
+### Sentinel
+
+阿里巴巴开源的微服务流量控制组件。https://sentinelguard.io/zh-cn/
+
+1. 下载jar包并直接启动
+
+```bat
+java -Dserver.port=8090 -Dcsp.sentinel.dashboard.server=localhost:8090 -D
+project.name=sentinel-dashboard -jar sentinel-dashboard-1.8.6.jar
+```
+
+2. 引入依赖
+
+```xml
+<!--sentinel-->
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+</dependency>
+```
+
+3. 配置sentinel地址
+
+```yml
+spring:
+  cloud:
+    sentinel:
+      transport:
+        dashboard: localhost:8090
+```
+
+簇点链路：就是单机调用链路。是一次请求进入服务后经过的每一个被Sentinel监控的资源链。默认Sentinel会监控SpringMVC的每一个Endpint（http接口）。限流熔断等都是针对簇点链路中的资源设置的。而资源名默认就是接口的请求路径
+
+```
+sentinel:
+    http-method-specify: true
+```
+
+开启这个配置可以让簇点链路带上请求方式
+
+在前台界面上可以限制QPS
