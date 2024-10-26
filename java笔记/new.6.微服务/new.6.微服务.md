@@ -874,8 +874,7 @@ public class DynamicRouterLoader {
 1. 下载jar包并直接启动
 
 ```bat
-java -Dserver.port=8090 -Dcsp.sentinel.dashboard.server=localhost:8090 -D
-project.name=sentinel-dashboard -jar sentinel-dashboard-1.8.6.jar
+java -Dserver.port=8090 -Dcsp.sentinel.dashboard.server=localhost:8090 -Dproject.name=sentinel-dashboard -jar sentinel-dashboard-1.8.6.jar
 ```
 
 2. 引入依赖
@@ -907,4 +906,98 @@ sentinel:
 
 开启这个配置可以让簇点链路带上请求方式
 
-在前台界面上可以限制QPS
+在前台界面上可以点击流控限制QPS和并发线程数实现限流和线程隔离
+
+#### FallBack
+
+1. 将FeignClient作为Sentinel的簇点资源
+
+   ```yml
+   feign:
+     sentinel:
+       enabled: true
+   ```
+
+2. 创建FallbackFactory
+
+   ```java
+   @Slf4j
+   public class ItemClientFallbackFactory implements FallbackFactory<ItemClient> {
+   
+       @Override
+       public ItemClient create(Throwable cause) {
+           return new ItemClient( ) {
+               @Override
+               public List<ItemDTO> queryItemByIds(Collection<Long> ids) {
+                   log.error("查询购物车失败 "+cause);
+                   return Collections.emptyList();
+               }
+   
+               @Override
+               public void deductStock(List<OrderDetailDTO> items) throws Throwable {
+                   log.error("扣减库存失败 "+cause);
+                   throw cause;
+               }
+           };
+       }
+   }
+   ```
+
+3. 将该类注册到Bean中
+
+   ```java
+   @Bean
+   public ItemClientFallbackFactory itemClientFallbackFactory(){
+       return new ItemClientFallbackFactory();
+   }
+   ```
+
+4. 在client上应用他
+
+   ```java
+   @FeignClient(value = "item-service",configuration = LogConfig.class, fallbackFactory = ItemClientFallbackFactory.class)
+   ```
+
+### 分布式事务
+
+在分布式系统中，如果一个业务需要多个服务合作完成，而且每一个服务都有事务，多个事务必须同时成功或者失败，这样的事务就是分布式事务。其中的每个服务的事务就是一个分支事务，整个业务成为全局事务。
+
+要解决分布式事务，需要各个子系统互相感知到彼此的状态
+
+![image-20241025205744127](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241025205744127.png)
+
+Seata解决分布式事务借助于三个角色
+
+1. TC 事务协调者：维护全局和分支事务的状态，协调全局事务的提交或回滚。
+2. TM 事务管理器：定义全局事务的范围、开始全局事务、提交或回滚全局事务。
+3. RM 资源管理器：管理分支事务，与TC交谈以注册分支事务和报告分支事务的状态
+
+使用Docker部署TC服务,他本身也是一个微服务,在注册中心注册
+
+```yml
+  seata:
+    image: seataio/seata-server:1.5.2
+    container_name: seata
+    privileged: true
+    environment:
+      SEATA_IP: 192.168.128.128
+    ports:
+      - "8099:8099"
+      - "7099:7099"
+    depends_on:
+      - nacos
+    networks:
+      - jzab
+    volumes:
+      - "./seata:/seata-server/resources"
+```
+
+#### 使用
+
+1. 引入依赖
+
+   ```xml
+   
+   ```
+
+2. 配置
