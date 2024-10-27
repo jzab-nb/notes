@@ -997,7 +997,96 @@ Seata解决分布式事务借助于三个角色
 1. 引入依赖
 
    ```xml
-   
+   <!--seata-->
+   <dependency>
+       <groupId>com.alibaba.cloud</groupId>
+       <artifactId>spring-cloud-starter-alibaba-seata</artifactId>
+   </dependency>
    ```
 
-2. 配置
+2. 在Nacos上创建共享配置并在需要配置分布式事务的服务引入
+
+   ```yml
+   seata:
+     registry: # TC服务注册中心的配置，微服务根据这些信息去注册中心获取tc服务地址
+       type: nacos # 注册中心类型 nacos
+       nacos:
+         server-addr: 192.168.128.128:8848 # nacos地址
+         namespace: "" # namespace，默认为空
+         group: DEFAULT_GROUP # 分组，默认是DEFAULT_GROUP
+         application: seata-server # seata服务名称
+         username: nacos
+         password: nacos
+     tx-service-group: hmall # 事务组名称
+     service:
+       vgroup-mapping: # 事务组与tc集群的映射关系
+         hmall: "default"
+   ```
+
+#### XA模式
+
+两阶段提交
+
+1. RM注册，RM执行但不提交，RM报告状态想TC
+2. TC检测分支状态，RM接受TC指令，进行提交或回滚
+
+![image-20241027182427209](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241027182427209.png)
+
+优点：强一致性，遵循规范标准，常用数据库都支持，实现简单没有代码侵入性
+
+缺点：等待时间长、性能差，依赖于关系型数据库
+
+开启XA模式：
+
+1. 配置文件中开启
+
+   ```yaml
+   seata:
+     data-source-proxy-mode: XA
+   ```
+
+2. 标记全局事务入口
+
+   ```java
+   @GlobalTransactional
+   public Long 方法名() {
+   
+   }
+   ```
+
+3. 其他分支事务添加@Transactional注解
+
+#### AT模式
+
+![image-20241027202711488](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241027202711488.png)
+
+缺点：可能出现短暂不一致性，只保证最终一致性
+
+使用:
+
+1. 在对应的数据库里创建undo-log表
+
+```sql
+-- for AT mode you must to init this sql for you business database. the seata server not need it.
+CREATE TABLE IF NOT EXISTS `undo_log`
+(
+    `branch_id`     BIGINT       NOT NULL COMMENT 'branch transaction id',
+    `xid`           VARCHAR(128) NOT NULL COMMENT 'global transaction id',
+    `context`       VARCHAR(128) NOT NULL COMMENT 'undo_log context,such as serialization',
+    `rollback_info` LONGBLOB     NOT NULL COMMENT 'rollback info',
+    `log_status`    INT(11)      NOT NULL COMMENT '0:normal status,1:defense status',
+    `log_created`   DATETIME(6)  NOT NULL COMMENT 'create datetime',
+    `log_modified`  DATETIME(6)  NOT NULL COMMENT 'modify datetime',
+    UNIQUE KEY `ux_undo_log` (`xid`, `branch_id`)
+) ENGINE = InnoDB
+  AUTO_INCREMENT = 1
+  DEFAULT CHARSET = utf8mb4 COMMENT ='AT transaction mode undo table';
+```
+
+2. 修改配置
+
+```yaml
+seata:
+  data-source-proxy-mode: AT
+```
+
