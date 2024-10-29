@@ -1122,3 +1122,139 @@ RabbitMQ: 高性能异步通信组件
 ### 技术选型
 
 ![image-20241028181008912](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241028181008912.png)
+
+### 安装-快速入门
+
+mq的整体架构:
+
+- virtual-host: 虚拟主机,起到消息隔离的作用
+
+- publisher: 消息发送者
+- consumer: 消息的消费者
+- queue: 队列,存储消息
+- exchange: 交换机,负责路由消息
+
+![image-20241029193244946](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241029193244946.png)
+
+
+
+交换机只会转发，不会存储消息
+
+1. 导入SpringAMQP的依赖
+
+   ```xml
+   <dependency>
+       <groupId>org.springframework.boot</groupId>
+       <artifactId>spring-boot-starter-amqp</artifactId>
+   </dependency>
+   ```
+
+2. 进行相关配置
+
+   ```yml
+   spring:
+     rabbitmq:
+       host: 192.168.128.128
+       port: 5672
+       virtual-host: hmall
+       username: hamll
+       password: 密码
+   ```
+
+3. 发送消息
+
+   ```java
+   @Resource
+   RabbitTemplate rabbitTemplate;
+   
+   @Test
+   public void test(){
+       String queueName = "simple.queue";
+       String msg = "你好,世界";
+       rabbitTemplate.convertAndSend(queueName,msg);
+   }
+   ```
+
+4. 接收消息
+
+   ```java
+   @Slf4j
+   @Component
+   public class SpringRabbitListener {
+       @RabbitListener(queues = "simple.queue")
+       public void listen(String msg){
+           log.info("msg={}",msg);
+       }
+   }
+   ```
+
+   
+
+## docker-compose配置汇总
+
+```yml
+# 版本信息
+version: "3.8"
+
+# 所有的容器
+services:
+  mysql:
+    image: mysql
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: 102099
+    volumes:
+      - "./mysql/conf:/etc/mysql/conf.d"
+      - "./mysql/data:/var/lib/mysql"
+      - "./mysql/init:/docker-entrypoint-initdb.d"
+    networks:
+      - jzab
+  nacos:
+    image: nacos/nacos-server:v2.1.0-slim
+    container_name: nacos
+    env_file:
+      - ./nacos/custom.env
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    networks:
+      - jzab
+    depends_on:
+      - mysql
+
+  seata:
+    image: seataio/seata-server:1.5.2
+    container_name: seata
+    privileged: true
+    environment:
+      SEATA_IP: 192.168.128.128
+    ports:
+      - "8099:8099"
+      - "7099:7099"
+    depends_on:
+      - nacos
+    networks:
+      - jzab
+    volumes:
+      - "./seata:/seata-server/resources"
+  mq:
+    image: rabbitmq:3.8-management
+    container_name: mq
+    environment:
+      RABBITMQ_DEFAULT_USER: jzab
+      RABBITMQ_DEFAULT_PASS: 102099
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    networks:
+      - jzab
+# 声明网络的标识和名称
+networks:
+  jzab:
+    name: jzab
+```
+
