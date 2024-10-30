@@ -1188,7 +1188,132 @@ mq的整体架构:
    }
    ```
 
-   
+### Work Queues
+
+任务模型，多个消费者绑定到一个队列，共同消费队列中的消息。
+
+```java
+@RabbitListener(queues = "work.queue")
+public void listen1(String msg){
+    log.info("msg1={}",msg);
+}
+
+@RabbitListener(queues = "work.queue")
+public void listen2(String msg){
+    log.error("msg2={}",msg);
+}
+```
+
+实际生产中不会这么做,而是只写一份,然后部署多份
+
+任务是平均分配的，处理的慢的也会分配到很多消息
+
+可以通过下面的配置来进行限制，只预先获取一条，处理的快的人处理的更多
+
+```java
+spring:
+  rabbitmq:
+    listener:
+      direct:
+        prefetch: 1
+```
+
+### 交换机
+
+交换机可以接收发送者发送的消息,并将消息路由到和他绑定的队列
+
+交换机的类型有三种:
+
+1. Fanout: 广播，把消息路由到每一个和他绑定的队列，也叫广播模式
+2. Direct: 定向，会把接受到的消息根据规则路由到指定的队列
+   - 每个队列都和交换机设置一个BindingKey
+   - 发布消息时设置RoutingKey
+   - 交换机将消息转发到具有和RoutingKey相同的BindingKey的队列
+3. Topic: 话题，也是基于RoutingKey的
+   - RoutingKey由多个单词组成，中间用点分隔
+   - BindingKey也可以由多个单词组成，且支持通配符，#代表0个或者多个单词*代表一个单词
+
+java向交换机发送消息: 
+
+```java
+@Test
+public void fanout(){
+    String exchange = "hmall.fanout";
+    rabbitTemplate.convertAndSend(exchange,"RoutingKey","Hello World2");
+}
+```
+
+### 基于Bean生成队列交换机
+
+```java
+@Configuration
+public class FanoutConfig {
+    @Bean
+    public FanoutExchange fanoutExchange(){
+        return new FanoutExchange("hmall.fanout");
+    }
+
+    @Bean
+    public Queue fanoutQueue1(){
+        return new Queue("fanout.queue1");
+    }
+
+    @Bean
+    public Queue fanoutQueue2(){
+        return new Queue("fanout.queue2");
+    }
+
+    @Bean
+    public Binding binding1(Queue fanoutQueue1, FanoutExchange fanoutExchange){
+        return BindingBuilder.bind(fanoutQueue1).to(fanoutExchange);
+    }
+
+    @Bean
+    public Binding binding2(Queue fanoutQueue2, FanoutExchange fanoutExchange){
+        return BindingBuilder.bind(fanoutQueue2).to(fanoutExchange);
+    }
+}
+```
+
+当要绑定的key太多时,代码很臃肿
+
+### 基于注解生成队列交换机
+
+```java
+@RabbitListener(
+    bindings = @QueueBinding(
+        value = @Queue("direct.queue2"),
+        exchange = @Exchange(value = "hmall.exchange",type = ExchangeTypes.DIRECT),
+        key = {"yellow","blue"}
+    )
+)
+```
+
+### 消息转换器
+
+官方默认实现是使用JDK序列化，性能差且不安全
+
+建议使用json转换器
+
+1. 引入jackson依赖
+
+```xml
+<dependency>
+    <groupId>com.fasterxml.jackson.core</groupId>
+    <artifactId>jackson-databind</artifactId>
+</dependency>
+```
+
+2. 配置MessageConverter到bean
+
+```java
+@Bean
+public MessageConverter messageConverter(){
+    return new Jackson2JsonMessageConverter(  );
+}
+```
+
+
 
 ## docker-compose配置汇总
 
