@@ -1313,7 +1313,200 @@ public MessageConverter messageConverter(){
 }
 ```
 
+### 发送者可靠性
 
+1. 发送者重连机制
+
+   ```yml
+   spring:
+     rabbitmq:
+       connection-timeout: 1s # 超时时间
+       template:
+         retry:
+           enabled: true # 是否重试,默认否
+           initial-interval: 1000ms # 失败后的等待时间
+           multiplier: 1 # 等待时间的翻倍倍数,为1不翻倍
+           max-attempts: 3 # 最大重试次数
+   ```
+
+   重连机制是阻塞性的，如果对于业务性能有要求，则建议禁用，或者采用异步进程发送消息
+
+2. 发送者确认机制
+
+   SpringAMQP提供了Publisher Confirm和Publisher Return两种确认机制。开启确认机制后，当发送者发送消息给MQ后，MQ会返回确认结果给发送者。返回的结果有以下几种情况。
+
+   - 消息到了MQ，但是路由失败，通过PublisherReturn返回路由异常的原因。
+   - 临时消息到了MQ，并且入队成功
+   - 持久消息到了MQ，并且入队完成持久化
+   - 这三种情况都属于投递成功，返回ACK，其他情况返回NACK，投递失败
+
+3. 开启确认机制
+
+   ```yml
+   spring:
+     rabbitmq:
+       publisher-confirm-type: correlated # 确认机制类型,correlated: 异步回调, simple: 阻塞等待
+       publisher-returns: true # 是否开启确认机制
+   ```
+
+   每个RabbitTemplate只能配置一个ReturnCallback，因此需要在项目启动过程中配置：
+
+   ```java
+   @Configuration
+   @RequiredArgsConstructor
+   @Slf4j
+   public class MqConfig {
+   
+       private final RabbitTemplate rabbitTemplate;
+   
+       @PostConstruct
+       public void init(){
+           rabbitTemplate.setReturnsCallback(returnedMessage -> {
+               log.error("触发return callback");
+               log.debug("交换机: {}",returnedMessage.getExchange());
+               log.debug("routingKey: {}",returnedMessage.getRoutingKey());
+               log.debug("消息: {}",returnedMessage.getMessage());
+               log.debug("返回码: {}",returnedMessage.getReplyCode());
+               log.debug("返回文本: {}",returnedMessage.getReplyText());
+           });
+       }
+   
+   }
+   ```
+
+   ConfirmCallback每次发送消息时都要指定
+
+   ```java
+   CorrelationData cd = new CorrelationData(UUID.randomUUID( ).toString());
+   String exchange = "hmall.exchange2";
+   
+   cd.getFuture().addCallback(
+       success->{
+           if(success==null){
+               log.error("未获取到响应结果");
+               return;
+           }
+           if(success.isAck()){
+               log.info("消息投递成功");
+           }else{
+               log.error("消息投递失败 {}",success.getReason());
+               // TODO: 重发消息
+               rabbitTemplate.convertAndSend(exchange,"www","Hello World2",cd);
+           }
+       },
+       failer->{log.error("处理响应失败 {}",failer.toString());}
+   );
+   rabbitTemplate.convertAndSend(exchange,"www","Hello World2",cd);
+   ```
+
+### MQ可靠性
+
+默认情况下,MQ会在内存中保存数据,会导致两个问题
+
+- 一旦MQ宕机,内存中的数据丢失
+- 内存空间有限,当消费者故障或者处理过慢时,会导致消息积压,引发MQ阻塞   
+
+RabbitMQ的持久化包括三个方面:
+
+- 交换机持久化, 默认开启
+- 队列持久化, 默认开启
+- 消息持久化，消息发送的时候选择投递模式，SpringAMQP默认开启
+
+RabbitMQ3.6.0之后的版本新增了LazyQueue的概念，也就是惰性队列
+
+- 接受消息后直接存入磁盘，不再存储到内存
+- 消费者消费时再从磁盘加载数据到内存（可以提前缓存一部分，最多2048条）
+
+3.12版本之后，所有队列默认都是LazyQueue模式，无法更改
+
+![image-20241031202312865](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241031202312865.png) 
+
+代码生成lazyQueue
+
+![image-20241031203527009](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241031203527009.png)
+
+**消费者确认机制**(Consumer Acknowledgement) 是为了确认消费者是否成功处理消息。当 消费者处理消息结束后，应该想MQ发送一个回执，告知MQ自己消息的处理状态。
+
+- ack：成功处理消息，RabbitMQ删除该消息
+- nack：消息处理失败，RabbitMQ需要再次投递消息
+- reject：消息处理失败并拒绝该消息，RabbitMQ删除该消息
+
+SpringAMQP已经实现了消息确认机制，允许我们通过配置文件选择ACK处理方式，有三种方式：
+
+- none：不处理。消息投递给消费者后立即ack，消息会立刻从MQ删除。不安全，不建议使用。
+- manual：手动模式，需要自己在业务代码中调用api，发送ack或者reject，存在业务入侵，但是更灵活
+- auto：自动模式，业务正常执行返回ACK，业务出现异常时，根据异常判断返回的不同结果：
+  - 业务异常返回nack
+  - 消息处理或者校验异常，返回reject
+
+```yml
+# 通过配置开启消费者确认模式 
+spring:
+  rabbitmq:
+    listener:
+      direct:
+        prefetch: 1
+      simple:
+        prefetch: 1
+        acknowledge-mode: auto
+```
+
+**失败重试机制**
+
+消费者在出现异常时利用本地重试,而不是无限的返回到mq,可以通过application.yml进行配置
+
+```yml
+spring: 
+  rabbitmq:
+    listener:
+      direct:
+        prefetch: 1
+      simple:
+        prefetch: 1
+        acknowledge-mode: auto
+        retry:
+          enabled: true
+          initial-interval: 1000ms
+          multiplier: 1
+          max-attempts: 3
+```
+
+三种重试策略:
+
+- RejectAndDontRequeueRecoverer，重试次数耗尽后，丢弃该消息，默认实现
+- ImmediateRequeueMessageRecoverer，重试次数耗尽后，放回队列
+- RepublishMessageRecoverer，重试次数耗尽后，放入指定队列
+
+```java
+@Bean
+public MessageRecoverer messageRecoverer(RabbitTemplate rabbitTemplate){
+    return new RepublishMessageRecoverer(rabbitTemplate,"交换机","routingKey");
+}
+```
+
+### 业务幂等性
+
+同一个业务执行一次或者多次，对业务状态的影响是一致的
+
+解决幂等性的方案：
+
+1. 唯一ID
+
+   - 每一条消息都生产一个唯一的ID，和消息一起投递给消费者
+   - 消费者接收到消息后先处理业务，业务处理成功后将id存入数据库
+   - 如果下次收到相同消息，去数据库查询是否存在，存在则为重复消息，放弃处理
+
+   ```java
+   @Bean
+   public MessageConverter messageConverter(){
+       Jackson2JsonMessageConverter jjmc = new Jackson2JsonMessageConverter( );
+       jjmc.setCreateMessageIds(true);
+       return jjmc;
+   }
+   ```
+
+2. 结合业务逻辑进行判断
+   - 比如标记订单状态为已支付前先判断订单状态是否为未支付
 
 ## docker-compose配置汇总
 
