@@ -1506,7 +1506,50 @@ public MessageRecoverer messageRecoverer(RabbitTemplate rabbitTemplate){
    ```
 
 2. 结合业务逻辑进行判断
+   
    - 比如标记订单状态为已支付前先判断订单状态是否为未支付
+
+### 延迟消息
+
+延迟消息：发送者在发送消息时指定一个时间，消费者不会立刻收到消息，而是在指定时间之后才收到消息。
+
+延迟任务：设置在一定时间之后才执行的任务
+
+**死信交换机**
+
+当一个队列中的消息满足下面的情况时，会成为死信（dead letter）：
+
+- 消费者使用basic.reject或者basic.nack声明消费失败，并且消息的requeue参数设置为false
+- 消息过期，超时无人消费
+- 要投递的队列消息堆积满了，最早的消息可能成为死信
+
+如果队列通过dead-letter-exchange属性指定了一个交换机，那么该队列中的死信就会投递到这个交换机中。这个交换机称之为死信交换机（Dead Letter Exchange DLX）
+
+![image-20241101191826597](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241101191826597.png)
+
+借助死信交换机实现延时消息:
+
+1. 定义一组有过期时间的交换机和队列
+2. 定义一组特殊的交换机和队列接受死信
+3. 指定第一组的死信交换机为第二组
+
+```java
+# 设置过期时间
+rabbitTemplate.convertAndSend("delay.exchange","hi","123",message -> {
+    message.getMessageProperties().setExpiration("30000");
+    return message;
+});
+```
+
+**延迟消息插件**
+
+![image-20241101194039123](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241101194039123.png)
+
+https://b11et3un53m.feishu.cn/wiki/A9SawKUxsikJ6dk3icacVWb4n3g
+
+### 取消超时订单
+
+![image-20241101200059670](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241101200059670.png)
 
 ## docker-compose配置汇总
 
