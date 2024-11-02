@@ -1551,6 +1551,28 @@ https://b11et3un53m.feishu.cn/wiki/A9SawKUxsikJ6dk3icacVWb4n3g
 
 ![image-20241101200059670](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241101200059670.png)
 
+## ES
+
+ElasticSearch用于实现大量数据的模糊搜索
+
+搜索引擎技术排名:
+
+1. ElasticSearch: 开源
+2. Splunk: 收费
+3. Solr: Apache开源
+
+Lucene是一个基于java的搜索引擎类库,实现了倒排索引
+
+ES基于Lecene实现,曾用名Compass
+
+ELK:
+
+​	ES、kibana、Logstash、Beats用于日志分析、实时监控
+
+![image-20241102093643312](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241102093643312.png)
+
+
+
 ## docker-compose配置汇总
 
 ```yml
