@@ -1575,6 +1575,8 @@ ELK:
 
 ## docker-compose配置汇总
 
+注意: 部署时es的文件夹需要提供777的权限
+
 ```yml
 # 版本信息
 version: "3.8"
@@ -1635,6 +1637,21 @@ services:
       - "5672:5672"
     networks:
       - jzab
+  es:
+    image: elasticsearch:7.12.1
+    container_name: es
+    environment:
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      discovery.type: single-node
+    privileged: true
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - jzab
+    volumes:
+      - "./es/es-data:/usr/share/elasticsearch/data"
+      - "./es/es-	plugins:/usr/share/elasticsearch/plugins"
 # 声明网络的标识和名称
 networks:
   jzab:
