@@ -1573,6 +1573,182 @@ ELK:
 
 
 
+### 倒排索引
+
+传统数据库采用正向索引，例如根据表的主键ID进行索引
+
+倒排索引的概念:
+
+文档(document): 每一行数据都是一个文档
+
+词条(term): 文档按照语义进行分词分成一个个词语
+
+![image-20241104175920378](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241104175920378.png)
+
+![image-20241104175938930](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241104175938930.png)
+
+### IK分词器
+
+正向迭代最细粒度切分算法
+
+下载压缩包解压到插件目录中,重启docker
+
+测试分词器,默认分词器为standard，ik有两种，ik_smart和ik_max_word
+
+```
+POST /_analyze
+{
+  "analyzer": "ik_max_word",
+  "text": "黑马程序员学习java太棒了"
+}
+```
+
+**自定义字典**
+
+修改分词器config目录下的xml配置文件
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+	<comment>IK Analyzer 扩展配置</comment>
+	<!--用户可以在这里配置自己的扩展字典 -->
+	<entry key="ext_dict">ext.dic</entry>
+	 <!--用户可以在这里配置自己的扩展停止词字典-->
+	<entry key="ext_stopwords"></entry>
+	<!--用户可以在这里配置远程扩展字典 -->
+	<!-- <entry key="remote_ext_dict">words_location</entry> -->
+	<!--用户可以在这里配置远程扩展停止词字典-->
+	<!-- <entry key="remote_ext_stopwords">words_location</entry> -->
+</properties>
+```
+
+然后再主机上创建ext.dic文件并写入内容
+
+写入完毕后上传到服务器上重启es服务即可应用
+
+### 核心概念
+
+文档数据会被转化为json格式进行保存
+
+类型相同的文档由一个索引近管理(索引库)
+
+映射(mapping): 文档的约束
+
+![image-20241104220914545](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241104220914545.png)
+
+### Mapping映射属性
+
+- type: 字段数据类型，常见的简单类型有：
+  - 字符串: text和keyword两种,keyword不分词
+  - 数值: byte,short,int,long,float,double
+  - 日期: date
+  - 对象: object
+  - 布尔: boolean
+- idex: 是否进行索引(默认为true)
+- analyzer: 使用的分词器的类型
+- properties: 该字段的子字段
+
+### 索引库的CRUD
+
+创建索引库
+
+```json
+PUT /test
+{
+  "mappings":{
+    "properties": {
+      "name":{
+        "type": "text",
+        "analyzer": "ik_max_word"
+      },
+      "age":{
+        "type": "byte"
+      }
+    }
+  }
+}
+```
+
+查询、删除
+
+```
+GET /test
+
+DELETE /test
+```
+
+更新,只能新增字段,不能修改已有字段
+
+```json
+PUT /test/_mapping
+"properties": {
+    "name":{
+        "type": "text",
+        "analyzer": "ik_max_word"
+    },
+    "age":{
+        "type": "byte"
+    }
+}
+```
+
+### 文档的CRUD
+
+新增文档
+
+```json
+POST /test/_doc/1
+{
+  "name":"Jack",
+  "age":10
+}
+```
+
+查询删除文档
+
+```json
+GET /test/_doc/2
+DELTE /test/_doc/2
+```
+
+修改文档
+
+1. 全量修改: 删除旧的文档,然后将新文档覆盖上去
+
+```json
+PUT /test/_doc/2
+{
+  "name":"小黑子2",
+  "age":102
+}
+```
+
+2. 只修改个别字段
+
+```json
+POST /test/_update/2
+{
+  "doc":{
+    "age": 102
+  }
+}
+```
+
+### 文档的批量操作
+
+```json
+POST /_bulk
+{"index": {"_index":"heima", "_id": "3"}}
+{"info": "黑马程序员C++讲师", "email": "ww@itcast.cn", "name":{"firstName": "五", "lastName":"王"}}
+{"index": {"_index":"heima", "_id": "4"}}
+{"info": "黑马程序员前端讲师", "email": "zhangsan@itcast.cn", "name":{"firstName": "三", "lastName":"张"}}
+{"delete":{"_index":"heima", "_id": "3"}}
+{"delete":{"_index":"heima", "_id": "4"}}
+```
+
+
+
 ## docker-compose配置汇总
 
 注意: 部署时es的文件夹需要提供777的权限
@@ -1632,11 +1808,18 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: jzab
       RABBITMQ_DEFAULT_PASS: 102099
+      # 插件目录
+      RABBITMQ_PLUGINS_DIR: '/plugins:/myplugins'
+    privileged: true
     ports:
       - "15672:15672"
       - "5672:5672"
     networks:
       - jzab
+    volumes:
+      - "./mq/mq-plugins:/myplugins"
+      - "./mq/data:/var/lib/rabbitmq"
+      - "./mq/logs:/var/log/rabbitmq"
   es:
     image: elasticsearch:7.12.1
     container_name: es
@@ -1652,6 +1835,15 @@ services:
     volumes:
       - "./es/es-data:/usr/share/elasticsearch/data"
       - "./es/es-	plugins:/usr/share/elasticsearch/plugins"
+  kibana:
+    image: kibana:7.12.1
+    container_name: kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://es:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - jzab
 # 声明网络的标识和名称
 networks:
   jzab:
