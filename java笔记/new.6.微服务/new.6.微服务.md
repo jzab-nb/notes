@@ -1747,6 +1747,110 @@ POST /_bulk
 {"delete":{"_index":"heima", "_id": "4"}}
 ```
 
+### Java的API
+
+1. 引入pom依赖
+
+   ```xml
+   <dependency>
+       <groupId>org.elasticsearch.client</groupId>
+       <artifactId>elasticsearch-rest-high-level-client</artifactId>
+   </dependency>
+   ```
+
+2. 在父工程中管理依赖的版本(因为springBoot会有一个默认版本)
+
+   ```xml
+   <properties>
+       <elasticsearch.version>7.12.1</elasticsearch.version>
+   </properties>
+   ```
+
+3. 初始化Client
+
+   ```java
+   client = new RestHighLevelClient(RestClient.builder(
+       HttpHost.create("http://192.168.128.128:9200")
+   ));
+   ```
+
+### JAVA API的索引库操作
+
+创建
+
+```java
+CreateIndexRequest request = new CreateIndexRequest("items");
+request.source(MAPPING_TEMPLATE, XContentType.JSON);
+client.indices().create(request, RequestOptions.DEFAULT);
+```
+
+获取
+
+```
+GetIndexRequest request = new GetIndexRequest("items");
+GetIndexResponse getIndexResponse = client.indices( ).get(request, RequestOptions.DEFAULT);
+```
+
+删除
+
+```java
+DeleteIndexRequest request = new DeleteIndexRequest("items");
+System.out.println(client.indices( ).delete(request, RequestOptions.DEFAULT));
+```
+
+### JAVA API的文档操作
+
+新增或者全局更新文档
+
+```java
+// 查询数据
+Item item = itemService.getById(317578);
+// 转为文档结构
+ItemDoc doc = BeanUtil.toBean(item, ItemDoc.class);
+// 构建请求
+IndexRequest items = new IndexRequest( ).index("items").id("317578");
+items.source(JSONUtil.toJsonStr(doc),XContentType.JSON);
+// 发送请求
+client.index(items,RequestOptions.DEFAULT);
+```
+
+查询文档
+
+```java
+GetRequest request = new GetRequest("items", "317578");
+GetResponse response = client.get(request, RequestOptions.DEFAULT);
+String source = response.getSourceAsString( );
+System.out.println(source);
+```
+
+删除文档
+
+```java
+DeleteRequest request = new DeleteRequest("items", "317578");
+client.delete(request, RequestOptions.DEFAULT);
+```
+
+局部更新文档
+
+```java
+UpdateRequest request = new UpdateRequest("items", "317578");
+request.doc( "price",10 );
+client.update(request, RequestOptions.DEFAULT);
+```
+
+批处理
+
+```java
+List<Item> records = itemService.page(Page.of(1, 50)).getRecords( );
+
+BulkRequest request = new BulkRequest();
+records.forEach(item->{
+    ItemDoc doc = BeanUtil.toBean(item, ItemDoc.class);
+    request.add(new IndexRequest().index("items").id( doc.getId()).source( JSONUtil.toJsonStr(doc),XContentType.JSON ));
+});
+client.bulk(request,RequestOptions.DEFAULT);
+```
+
 
 
 ## docker-compose配置汇总
