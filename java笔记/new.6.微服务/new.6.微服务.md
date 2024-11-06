@@ -1851,6 +1851,418 @@ records.forEach(item->{
 client.bulk(request,RequestOptions.DEFAULT);
 ```
 
+### DSL
+
+Domain Specific Languange 允许以JSOn的格式来定义查询条件
+
+- 叶子查询: 在特定的字段里查询特定值
+- 复合查询: 以逻辑方式组合多个叶子查询或者更改叶子查询的行为方式
+
+在查询以后还可以对查询的结果做处理,包括:
+
+- 排序
+- 分页
+- 高亮
+- 聚合
+
+#### 快速入门
+
+查询语法
+
+```json
+GET /items/_search
+{
+  "query": {
+    "match_all":{}
+  }
+}
+```
+
+返回结果
+
+```json
+{
+    "took": 4,
+    "time_out": false,
+    "_shards": {分片数据},
+    "hits":{
+        "total":{
+            "value":"50",
+            "relation": "eq"
+        },
+        "max_score": 1.0,
+        "hits":[
+        	{
+        		"_index":"items",
+        		"_type":"_doc",
+        		"_id":"",
+                "_score":1.0,
+                "_source":{原始数据}
+    		}
+        ]
+    }
+}
+```
+
+注意:
+
+- 一次最多查询1w条数据,total部分的relation会表示出实际查到的数据和value的关系
+
+- 里层的hits默认只返回10条数据
+
+#### 叶子查询
+
+常见的叶子查询有
+
+- 全文索引(full text)查询: 利用分词器对输入内容进行分词,然后去词条列表中匹配
+  - match_query
+  - multi_match_query
+- 精确查询
+  - ids：根据id进行批量查询
+  - range：匹配值的范围
+  - term：词条查询，不分词直接匹配
+- 地理查询：用于搜索地理位置
+  - geo_distance
+  - geo_bounding_box
+
+**全文索引**
+
+match查询: 全文检索的一种，直接分词然后去倒排索引库检索
+
+```json
+GET /items/_search
+{
+  "query": {
+    "match": {
+      "name": "拉杆"
+    }
+  }
+}
+```
+
+multi_match: 和match类似，允许同时查询多个字段
+
+```json
+GET /items/_search
+{
+  "query": {
+    "multi_match": {
+      "query": "拉杆",
+      "fields": ["name","category"]
+    }
+  }
+}
+```
+
+**精确查询**
+
+term: 完全匹配
+
+```json
+GET /items/_search
+{
+  "query": {
+    "term": {
+      "id": {
+        "value": "317580"
+      }
+    }
+  }
+}
+```
+
+range: 范围查询
+
+```json
+GET /items/_search
+{
+  "query": {
+    "range": {
+      "price": {
+        "gt": 10,
+        "lte": 60000
+      }
+    }
+  }
+}
+```
+
+ids: id组查询
+
+```json
+GET /items/_search
+{
+  "query": {
+    "ids": {
+      "values": ["626738"]
+    }
+  }
+}
+```
+
+#### 复合查询
+
+分为两类
+
+1. 基于逻辑运算组合叶子查询，实现组合条件
+   - bool
+2. 基于某种算法修改查询时的文档的相关性算分，从而改变文档排名
+   - function_score
+   - dis_max
+
+布尔查询是一个或多个查询子句的组合，子查询的组合方式有：
+
+- must：必须匹配每个子查询，类似与
+- should：选择性匹配子查询，类似于或
+- must_not：必须不匹配，不参与算法，类似非
+- filter: 必须匹配，不参与算分
+
+```json
+GET /items/_search
+{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match": {
+            "name": "智能手机"
+          }
+        }
+      ],
+      "filter": [
+        {"term": {
+          "brand": "华为"
+        }},
+        {"range": {
+          "price": {
+            "gte": 90000,
+            "lte": 159900
+          }
+        }}
+      ]
+    }
+  }
+}
+```
+
+#### 排序和分页
+
+排序，默认按照相关度算分进行排序，也可以指定字段进行排序，可以排序的字段类型必须是不可分词的，例如keyword、数值、地理坐标、日期
+
+```json
+GET /items/_search
+{
+  "query": {},
+  "sort": [
+    {
+      "字段": {
+        "order": "排序方式"
+      },
+      "price": "asc"
+    }
+  ]
+}
+
+```
+
+分页,默认只返回top10的数据,通过修改分页参数来进行分页
+
+```json
+GET /items/_search
+{
+  "query": {},
+  "from": 开始文档数,
+  "size": 查询结果数, 
+  "sort": []
+}
+```
+
+#### 深度分页问题
+
+一个索引中的数据分成N份，存储到不同的节点上，查询数据时需要汇总各个分片的数据
+
+查第100页的数据，每页查10条，需要先对数据排序，再找出990-1000名
+
+当要查询的页数靠后时，需要读取很大的数据量
+
+search after: 分页式需要排序，原理是从上一次的排序值开始，查询下一页数据。官方推荐
+
+scroll：原理将数据形成快照，保存在内存。官方已经不推荐使用
+
+from+size不能超过1w条
+
+#### 高亮显示
+
+指定要高亮的字段和前后标签
+
+```json
+GET /items/_search
+{
+  "query": {},
+  "from": 0,
+  "size": 20, 
+  "sort": [],
+  "highlight": {
+    "fields": {
+      "name":{
+        "pre_tags": "<JZAB>",
+        "post_tags": "</JZAB>"
+      }
+    }
+  }
+}
+```
+
+### Java客户端进行查询
+
+#### 快速入门
+
+```java
+// 1.创建查询
+SearchRequest searchRequest = new SearchRequest("items");
+// 2.拼接查询条件
+searchRequest.source().query(QueryBuilders.matchAllQuery());
+// 3.获取查询结果
+SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
+// 4.解析查询结果
+for (SearchHit hit : response.getHits( ).getHits( )) {
+    System.out.println(hit.getSourceAsString( ));
+}
+```
+
+#### 查询条件
+
+```java
+// 全文索引
+QueryBuilders.matchQuery("name", "手机");
+QueryBuilders.multiMatchQuery("手机","name","category");
+// 精确匹配
+QueryBuilders.termQuery("category","手机");
+// 范围查询
+QueryBuilders.rangeQuery("price").gt(1).lt(2);
+// 复合查询
+BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery( );
+boolQueryBuilder.must(QueryBuilders.matchQuery("name","手机"));
+boolQueryBuilder.must(QueryBuilders.matchQuery("name","华为"));
+```
+
+例如:
+
+```java
+BoolQueryBuilder boolQuery = QueryBuilders.boolQuery( );
+boolQuery.must(QueryBuilders.matchQuery("name","脱脂牛奶"));
+boolQuery.filter(QueryBuilders.termQuery("brand","德亚"));
+boolQuery.filter(QueryBuilders.rangeQuery("price").lt(30000));
+searchRequest.source().query(boolQuery);
+```
+
+#### 排序和分页
+
+```java
+searchRequest.source().from(0).size(20);
+
+searchRequest.source().sort("price", SortOrder.ASC);
+```
+
+#### 高亮
+
+```java
+searchRequest.source().highlighter(
+    SearchSourceBuilder.highlight()
+    .field("name")
+    .preTags( "<jzab>" )
+    .postTags( "</jzab>")
+);
+```
+
+高亮的结果是一个数组,单个元素超过阈值时会切割作为数组的元素.
+
+处理时应该拼接起来
+
+### 聚合操作
+
+聚合分三类：
+
+- 桶聚合（Bucket）：用来对文档进行分组
+  - TermAggregation：按照文档字段值分组
+  - Date Histogram：按照日期阶梯分组，例如一周一组，一月一组等
+- 度量聚合（Metric）：用于计算一些值，比如最大、最小、平均
+  - Avg: 平均值
+  - Max: 最大值
+  - Min: 最小值
+  - Stats: 同时求max,min,avg,sum等
+- 管道聚合（pipeline）：其他聚合的结果为基础做聚合
+
+注意，参与聚合的字段必须是不分词的字段
+
+#### DSL聚合
+
+```java
+GET /items/_search
+{
+  "query": {
+    "term": {
+      "category": "手机"
+    }
+  },
+  "size": 0,
+  "aggs": {
+    "JZAB": {
+      "stats": {
+        "field": "isAD"
+      }
+    },
+    "广告分组":{
+      "terms": {
+        "field": "isAD",
+        "size": 10
+      }
+    },
+    "品牌分组":{
+      "terms": {
+        "field": "brand",
+        "size": 10
+      },
+      "aggs": {
+        "信息": {
+          "stats": {
+            "field": "price"
+          }
+        }
+      }
+    },
+    "分类分组":{
+      "terms": {
+        "field": "category",
+        "size": 10
+      }
+    }
+  }
+}
+
+```
+
+
+
+#### Java聚合
+
+```java
+// 1.创建查询
+SearchRequest searchRequest = new SearchRequest("items");
+// 2.拼接查询条件
+searchRequest.source().size(0)
+    .aggregation(
+    AggregationBuilders.terms("品牌分组").field( "brand" ).size(100)
+);
+SearchResponse response = client.search(searchRequest, RequestOptions.DEFAULT);
+// 根据聚合名称获取聚合的结果
+Terms terms = response.getAggregations( ).get("品牌分组");
+// 遍历聚合的结果
+for (Terms.Bucket bucket : terms.getBuckets( )) {
+    System.out.println(bucket.getKey()+" "+bucket.getDocCount() );
+}
+```
+
 
 
 ## docker-compose配置汇总
