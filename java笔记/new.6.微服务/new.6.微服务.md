@@ -2263,6 +2263,53 @@ for (Terms.Bucket bucket : terms.getBuckets( )) {
 }
 ```
 
+### function_score
+
+可以自定义打分,先通过query查询出结果,再通过functions里面的内容进行计算分数,默认相乘
+
+详细教学: https://blog.csdn.net/weixin_39489487/article/details/143335180
+
+```json
+GET /items/_search
+{
+  "query": {
+    "function_score": {
+      "query": {
+        "term": {
+          "category": {
+            "value": "手机"
+          }
+        }
+      },
+      "functions": [
+        {
+          "filter": {"term":{"isAD": true}},
+          "weight": 100
+        }
+      ]
+    }
+  }
+}
+```
+
+java操作
+
+```java
+// 算分函数数组,允许有多个算分函数
+FunctionScoreQueryBuilder.FilterFunctionBuilder[] builders = new FunctionScoreQueryBuilder.FilterFunctionBuilder[1];
+// 构造算分函数,包含生效条件和函数类型,这里选择权重型,设置权重为10
+builders[0] = new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.termQuery("isAD",true),ScoreFunctionBuilders.weightFactorFunction(10));
+// 将旧的查询和算法函数数组传入
+FunctionScoreQueryBuilder funcQueryBuilder = QueryBuilders.functionScoreQuery(
+    boolQueryBuilder,
+    builders
+);
+// 设置分数计算模式
+funcQueryBuilder.scoreMode(FunctionScoreQuery.ScoreMode.MULTIPLY);
+// 应用查询
+searchRequest.source().query(funcQueryBuilder);
+```
+
 
 
 ## docker-compose配置汇总
