@@ -23,7 +23,7 @@ SpringCloud技术栈：SpringCloud集成了各种微服务功能组件,基于Spr
 - 服务注册发现：Eureka，Nacos，Consul
 - 服务远程调用：OpenFeign，Dubbo
 - 服务链路监控：Zipkin，Sleuth
-- 统一配置管理：SpringCloudCOnfig，Nacos
+- 统一配置管理：SpringCloudConfig，Nacos
 - 统一网关路由：SpringCloudGateway，Zuul
 - 流控、降级、保护：Hystix，Sentinel
 
