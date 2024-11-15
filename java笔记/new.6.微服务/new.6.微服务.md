@@ -2408,6 +2408,115 @@ Netflix公司开源的一个注册中心组件，工作原理和nacos类似。
 - Nacos在服务更新时有主动推送功能
 - Naco默认采用AP(可用),但也支持CP(一致),Eureka采用AP
 
+### 远程调用
+
+负载均衡原理:
+
+SpringCloud2020版本开始，SpringCloud弃用Ribbon，改用Spring自己开源的Spring Cloud LoadBalancer了，OpenFeign，Gateway都已经与其整合
+
+OpenFeign在整合的时候，和我们手动服务发现，负载均衡的流程类似：
+
+1. 获取serviceId,也就是服务名称
+2. 根据serviceId拉取服务列表
+3. 利用负载均衡算法选择一个服务
+4. 重构请求的URL路径,发起远程调用
+
+![image-20241114202110286](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241114202110286.png)
+
+切换负载均衡:
+
+1. 创建bean
+
+   ```java
+   public class LoadBalancerConfiguration {
+       @Bean
+       public ReactorLoadBalancer<ServiceInstance> reactorServiceInstanceLoadBalancer(
+               Environment environment,
+               LoadBalancerClientFactory loadBalancerClientFactory,
+               NacosDiscoveryProperties properties
+       ){
+           String name = environment.getProperty(LoadBalancerClientFactory.PROPERTY_NAME);
+           return new NacosLoadBalancer(
+                   loadBalancerClientFactory.getLazyProvider(name, ServiceInstanceListSupplier.class),
+                   name,
+                   properties
+           );
+       }
+   }
+   ```
+
+2. 在主类上配置
+
+   ```java
+   @LoadBalancerClients(defaultConfiguration = LoadBalancerConfiguration.class)
+   ```
+
+Nacos的负载均衡会优先使用同集群的服务
+
+负载均衡规则为随机带权重的负载均衡
+
+### 服务保护
+
+#### 线程隔离
+
+线程隔离有两种方式实现
+
+- 线程池隔离(Hystix默认采用)
+- 信号量隔离(Sentinel默认采用)
+
+Sentinel的线程隔离和Hystix的线程隔离有什么差别呢?
+
+- Hystix默认基于线程池实现线程隔离，每一个被隔离的业务都要创建一个独立的线程池，线程过多会带来额外的CPU开销，性能一般，但是隔离性更强
+- Sentinel则是基于信号量隔离的原理，这种方式不用创建线程池，性能较好，但是隔离性一般
+
+#### 滑动窗口算法
+
+固定窗口计数器算法:
+
+- 将时间划分为多个窗口,窗口时间跨度称为Interval
+- 每个窗口分别技术统计,每有一次请求就将计数加一,限流就是设置计数器的阈值
+- 如果计数器超过了限流阈值,则超出阈值的请求都被丢弃
+
+![image-20241114212156003](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241114212156003.png)
+
+滑动窗口计数器算法: 将一个窗口划分为n个更小的区间,例如
+
+- 窗口时间跨度Interval为1秒,区间熟练n=2,则每个小区间时间跨度为500ms,每个区间都有计数器
+- 限流阈值依然为3,时间窗口(1秒)内请求超过阈值时,超出的请求被限流
+- 窗口会根据当前请求所在时间(currentTime)移动,创建范围是从(currentTime-Interval)之后的第一个时区开始,到currentTime所在时区结束
+
+![image-20241114213014183](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241114213014183.png)
+
+#### 漏桶算法
+
+- 每个请求都视作水滴放入漏桶进行存储
+
+- 漏桶以固定速率向外漏出请求来执行,如果漏桶空了则停止漏水
+
+- 如果漏桶满了则多余的水滴会被丢弃
+
+- 可以理解为超出阈值的请求在桶中排队等待
+
+![image-20241114213734848](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241114213734848.png)
+
+#### 令牌桶算法
+
+- 以固定的速率生成令牌,存入令牌桶中,如果令牌桶满了,停止生成
+- 请求进入后,必须先尝试从桶中获取令牌,获取到令牌后才可以被处理
+- 如果令牌桶中没有令牌,则请求等待或丢弃
+
+![image-20241114213933595](new.6.%E5%BE%AE%E6%9C%8D%E5%8A%A1.assets/image-20241114213933595.png)
+
+一般用于热点参数限流，对某一个参数进行限流
+
+#### Sentinel的限流与Gateway的限流有什么差别
+
+限流算法常见的有三种实现：滑动窗口、令牌桶、漏桶，Gateway采用了基于Redis实现的令牌桶算法，Sentinel支持多种算法：
+
+- 默认基于滑动时间窗口，断路器的计数也是基于华东时间窗口
+- 限流后可以快速失败或排队等待，等待基于漏桶算法
+- 热点参数限流基于令牌桶算法
+
 ## docker-compose配置汇总
 
 注意: 部署时es的文件夹需要提供777的权限
