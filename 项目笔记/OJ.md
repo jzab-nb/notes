@@ -66,3 +66,23 @@ ac: 题目通过
 
 后端：Java进程控制，Java安全管理，Docker（代码沙箱），SpringCloud微服务、消息队列
 
+## 项目初始化
+
+### 前端初始化
+
+node版本: 18或16
+
+npm: 9或者10
+
+安装脚手架，npm镜像有问题的，可以查看C:/User/用户名/.npmrc文件
+
+```cmd
+npm install -g @vue/cli
+```
+
+验证vue安装是否正确
+
+```cmd
+vue -V
+```
+
