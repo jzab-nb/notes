@@ -83,6 +83,6 @@ npm install -g @vue/cli
 验证vue安装是否正确
 
 ```cmd
-vue -V
+vue -V 
 ```
 
