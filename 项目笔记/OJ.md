@@ -86,3 +86,18 @@ npm install -g @vue/cli
 vue -V 
 ```
 
+使用脚手架创建项目
+
+```cmd
+vue create 项目名
+```
+
+![image-20241212202135625](C:\Users\86131\AppData\Roaming\Typora\typora-user-images\image-20241212202135625.png)
+
+格式化美化配置
+
+![image-20241212205842201](C:\Users\86131\AppData\Roaming\Typora\typora-user-images\image-20241212205842201.png)
+
+引入组件
+
+组件库: https://arco.design/vue/docs/start
